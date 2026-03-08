@@ -37,8 +37,8 @@ function AssetMarker({ agent, cellSize }: { agent: Agent; cellSize: number }) {
       </TooltipTrigger>
       <TooltipContent side="top" className="font-mono text-xs space-y-1 p-3">
         <div className="text-foreground font-semibold">Asset {String(agent.id).padStart(3, '0')}</div>
-        <div className="text-muted-foreground">Velocity: {agent.velocity.toFixed(1)} u/t</div>
-        <div className="text-muted-foreground">Energy: {agent.energy.toFixed(1)}%</div>
+        <div className="text-muted-foreground">Velocity: {(agent.velocity ?? 0).toFixed(1)} u/t</div>
+        <div className="text-muted-foreground">Energy: {(agent.energy ?? 100).toFixed(1)}%</div>
         <div className="text-muted-foreground">Position: ({agent.x}, {agent.y})</div>
         {agent.targetX !== null && (
           <div className="text-primary">Target: ({agent.targetX}, {agent.targetY})</div>
