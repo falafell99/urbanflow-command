@@ -244,7 +244,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     // Force all moving agents to recalculate
     newState.agents = newState.agents.map(a => {
       if (a.status === 'moving' && a.targetX !== null && a.targetY !== null) {
-        return { ...a, path: simplePath(a.x, a.y, a.targetX, a.targetY, newBlocked) };
+        return { ...a, path: simplePath(a.x, a.y, a.targetX, a.targetY, newBlocked, newState.manualBlocks) };
       }
       return a;
     });
