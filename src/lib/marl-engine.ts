@@ -545,6 +545,16 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.status = 'stuck';
       a.velocity = 0;
       a.confidence = 'stuck';
+      // When freeze ends, recalculate path from scratch
+      if (a.freezeTicks === 0 && a.targetX !== null && a.targetY !== null) {
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        a.lastPathTick = newState.tick;
+        a.status = 'moving';
+        a.confidence = 'recalculating';
+        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Unfreeze]: Global route recalculated — resuming movement`, type: 'info' });
+      }
       desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
       return a;
     }
