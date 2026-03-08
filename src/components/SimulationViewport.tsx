@@ -93,6 +93,9 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
         {agent.backoffTicks > 0 && (
           <div className="text-warning">Backoff: {agent.backoffTicks} ticks</div>
         )}
+        {agent.freezeTicks > 0 && (
+          <div className="text-destructive">[STUCK] Frozen: {agent.freezeTicks} ticks remaining</div>
+        )}
       </TooltipContent>
     </Tooltip>
   );
