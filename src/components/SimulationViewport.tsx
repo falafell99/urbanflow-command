@@ -182,6 +182,24 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
         </motion.div>
       ))}
 
+      {/* Manual Blocks */}
+      {state.manualBlocks.map((b, i) => (
+        <div
+          key={`manual-${i}`}
+          className="absolute z-[5]"
+          style={{
+            left: `${b.x * cellSize}%`,
+            top: `${b.y * cellSize}%`,
+            width: `${cellSize}%`,
+            height: `${cellSize}%`,
+          }}
+        >
+          <div className="w-full h-full rounded-sm bg-destructive/40 border border-destructive flex items-center justify-center">
+            <span className="text-destructive text-[7px] font-mono font-bold">✕</span>
+          </div>
+        </div>
+      ))}
+
       {/* Trajectories */}
       {state.agents
         .filter(a => a.path.length > 0)
