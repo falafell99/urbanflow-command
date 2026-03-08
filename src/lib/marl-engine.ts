@@ -506,6 +506,37 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     });
   }
 
+  // === DYNAMIC PATH INVALIDATION: check if any agent's path crosses a blocked cell ===
+  newState.agents = newState.agents.map(a => {
+    if (a.status !== 'moving' || a.path.length === 0) return a;
+    const pathHitsBlock = a.path.some(p => isBlocked(p.x, p.y, newState.blockedIntersections, newState.manualBlocks));
+    if (!pathHitsBlock) return a;
+    if (a.targetX !== null && a.targetY !== null) {
+      const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
+      const newPath = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+      newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Path Invalidated]: Obstacle on route — immediate A* recalculation`, type: 'warning' });
+      return { ...a, path: newPath, confidence: 'recalculating' as const, lastPathTick: newState.tick };
+    }
+    return { ...a, path: [], status: 'idle' as const };
+  });
+
+  // === EVACUATION: if an agent is standing on a blocked cell, move it out ===
+  newState.agents = newState.agents.map(a => {
+    if (!isBlocked(a.x, a.y, newState.blockedIntersections, newState.manualBlocks)) return a;
+    const occupiedSet = new Set(newState.agents.map(ag => cellKey(ag.x, ag.y)));
+    const escape = findClearanceCell(a, newState.blockedIntersections, newState.manualBlocks, occupiedSet, new Set());
+    if (escape) {
+      newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Evacuate]: Standing on blocked cell — moving to (${escape.x},${escape.y})`, type: 'error' });
+      const updated = { ...a, x: escape.x, y: escape.y, path: [] as { x: number; y: number }[], confidence: 'recalculating' as const };
+      if (updated.targetX !== null && updated.targetY !== null) {
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
+        updated.path = simplePath(escape.x, escape.y, updated.targetX, updated.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+      }
+      return updated;
+    }
+    return a;
+  });
+
   // Expire deliveries
   newState.deliveryPoints = newState.deliveryPoints.filter(dp => {
     if (newState.tick - dp.spawnTime > dp.timeout) {
