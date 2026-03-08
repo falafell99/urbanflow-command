@@ -17,6 +17,7 @@ const statusLabels: Record<string, { label: string; className: string }> = {
   delivering: { label: 'Delivering', className: 'text-success' },
   idle: { label: 'Idle', className: 'text-muted-foreground' },
   waiting: { label: 'Backoff', className: 'text-warning' },
+  waiting_target: { label: 'Waiting Target', className: 'text-purple-400' },
 };
 
 export default function AssetTable({ state }: Props) {
