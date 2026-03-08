@@ -21,6 +21,8 @@ export interface Agent {
   backoffTicks: number;
   stuckTicks: number;
   oscillationCycles: number;
+  directionChanges: number;
+  coolingTicks: number;
 }
 
 export interface DeliveryPoint {
