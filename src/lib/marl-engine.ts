@@ -111,6 +111,7 @@ function createAgent(id: number): Agent {
     prevPositions: [],
     backoffTicks: 0,
     stuckTicks: 0,
+    oscillationCycles: 0,
   };
 }
 
