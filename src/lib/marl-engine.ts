@@ -649,17 +649,16 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.status = 'waiting';
       a.stuckTicks = (a.stuckTicks || 0) + 1;
 
-      // STUCK REROUTE: If stuck behind another agent for 3+ ticks, reroute
-      if (a.stuckTicks >= 3 && a.targetX !== null && a.targetY !== null) {
-        // Mark the blocking cell as temporary obstacle for pathfinding
+      // Wide reroute only after sustained blockage
+      if (a.stuckTicks > BLOCKED_REROUTE_THRESHOLD && a.targetX !== null && a.targetY !== null) {
         const blockingCell = { x: move.nextX, y: move.nextY };
-        const tempBlocks = [...newState.manualBlocks, blockingCell];
-        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, tempBlocks);
-        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, tempBlocks);
+        const dynamicCosts = buildBufferCosts(updatedAgents, a.id, blockingCell);
+        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.stuckTicks = 0;
         a.status = 'moving';
         a.confidence = 'recalculating';
-        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Reroute]: Stuck for 3 ticks — marking (${blockingCell.x},${blockingCell.y}) as obstacle, recalculating A* path`, type: 'warning' });
+        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Wide Reroute]: Blocked >5 ticks — boosting cost at (${blockingCell.x},${blockingCell.y}) to escape jam`, type: 'warning' });
       }
       return a;
     }
