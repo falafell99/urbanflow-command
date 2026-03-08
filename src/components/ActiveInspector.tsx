@@ -15,6 +15,7 @@ const objectives: Record<string, string> = {
   delivering: 'Completing delivery handoff',
   idle: 'Awaiting task assignment',
   waiting: 'Stochastic backoff — resolving deadlock',
+  waiting_target: 'Waiting for target cell to clear...',
 };
 
 export default function ActiveInspector({ agent, tick, onClose }: Props) {
@@ -80,10 +81,14 @@ export default function ActiveInspector({ agent, tick, onClose }: Props) {
                 ? 'border-primary/40 text-primary text-[10px]'
                 : agent.status === 'delivering'
                   ? 'border-success/40 text-success text-[10px]'
-                  : 'border-muted-foreground/40 text-muted-foreground text-[10px]'
+                  : agent.status === 'waiting_target'
+                    ? 'border-purple-400/40 text-purple-400 text-[10px]'
+                    : agent.status === 'waiting'
+                      ? 'border-orange-400/40 text-orange-400 text-[10px]'
+                      : 'border-muted-foreground/40 text-muted-foreground text-[10px]'
             }
           >
-            {agent.status === 'moving' ? 'In Transit' : agent.status === 'delivering' ? 'Delivering' : 'Idle'}
+            {agent.status === 'moving' ? 'In Transit' : agent.status === 'delivering' ? 'Delivering' : agent.status === 'waiting_target' ? 'Waiting for Target' : agent.status === 'waiting' ? 'Backoff' : 'Idle'}
           </Badge>
         </div>
 

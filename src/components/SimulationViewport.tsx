@@ -19,6 +19,7 @@ const confidenceColor = {
   clear: 'hsl(var(--success))',
   recalculating: 'hsl(38 92% 50%)',
   blocked: 'hsl(var(--destructive))',
+  waiting_target: 'hsl(270 70% 60%)',
 };
 
 function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: Agent; cellSize: number; selected: boolean; dimmed: boolean; onSelect: () => void }) {
@@ -28,7 +29,9 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
       ? 'hsl(var(--success))'
       : agent.status === 'waiting'
         ? 'hsl(38 92% 50%)'
-        : 'hsl(var(--muted-foreground))';
+        : agent.status === 'waiting_target'
+          ? 'hsl(270 70% 60%)'
+          : 'hsl(var(--muted-foreground))';
 
   const ringColor = confidenceColor[agent.confidence];
 

@@ -13,14 +13,16 @@ export interface Agent {
   deliveries: number;
   collisions: number;
   waitTime: number;
-  status: 'idle' | 'moving' | 'delivering' | 'waiting';
+  status: 'idle' | 'moving' | 'delivering' | 'waiting' | 'waiting_target';
   velocity: number;
   energy: number;
-  confidence: 'clear' | 'recalculating' | 'blocked';
+  confidence: 'clear' | 'recalculating' | 'blocked' | 'waiting_target';
   prevPositions: { x: number; y: number }[];
   backoffTicks: number;
   stuckTicks: number;
   oscillationCycles: number;
+  directionChanges: number;
+  coolingTicks: number;
 }
 
 export interface DeliveryPoint {
@@ -112,6 +114,8 @@ function createAgent(id: number): Agent {
     backoffTicks: 0,
     stuckTicks: 0,
     oscillationCycles: 0,
+    directionChanges: 0,
+    coolingTicks: 0,
   };
 }
 
@@ -159,6 +163,9 @@ const BUFFER_ZONE_COST = 6;
 const BLOCKED_REROUTE_THRESHOLD = 5;
 const OSCILLATION_CYCLE_THRESHOLD = 3;
 const MAX_ASTAR_ITERATIONS = 800;
+const DIRECTION_CHANGE_LIMIT = 3;
+const DIRECTION_WINDOW = 5;
+const COOLING_PERIOD = 10;
 
 function cellKey(x: number, y: number) {
   return `${x},${y}`;
@@ -457,6 +464,42 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       ? distance(a.x, a.y, a.targetX, a.targetY)
       : Number.POSITIVE_INFINITY;
 
+    // === Movement Cooling: too many direction changes without progress ===
+    if (a.coolingTicks > 0) {
+      a.coolingTicks--;
+      a.status = 'waiting';
+      a.velocity = 0;
+      a.confidence = 'recalculating';
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+      return a;
+    }
+
+    // Track direction changes
+    if (a.prevPositions.length >= 2) {
+      const prev = a.prevPositions[a.prevPositions.length - 2];
+      const curr = a.prevPositions[a.prevPositions.length - 1];
+      const dx1 = curr.x - prev.x;
+      const dy1 = curr.y - prev.y;
+      const dx2 = a.x - curr.x;
+      const dy2 = a.y - curr.y;
+      if ((dx1 !== 0 || dy1 !== 0) && (dx2 !== 0 || dy2 !== 0) && (dx1 !== dx2 || dy1 !== dy2)) {
+        a.directionChanges = (a.directionChanges || 0) + 1;
+      }
+    }
+    if (newState.tick % DIRECTION_WINDOW === 0) {
+      if (a.directionChanges > DIRECTION_CHANGE_LIMIT) {
+        a.coolingTicks = COOLING_PERIOD;
+        a.directionChanges = 0;
+        a.status = 'waiting';
+        a.velocity = 0;
+        a.confidence = 'recalculating';
+        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Cooling]: Excessive direction changes — stationary for ${COOLING_PERIOD} ticks`, type: 'warning' });
+        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+        return a;
+      }
+      a.directionChanges = 0;
+    }
+
     // Handle backoff cooldown
     if (a.backoffTicks > 0) {
       a.backoffTicks--;
@@ -496,6 +539,27 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       return a;
     }
 
+    // === Wait-for-target: if already in waiting_target state ===
+    if (a.status === 'waiting_target') {
+      if (a.targetX !== null && a.targetY !== null) {
+        const targetKey = cellKey(a.targetX, a.targetY);
+        if (!currentOccupied.has(targetKey)) {
+          const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+          a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+          a.status = 'moving';
+          a.confidence = 'clear';
+          a.velocity = 1.0;
+        } else {
+          a.velocity = 0;
+          a.confidence = 'waiting_target';
+          desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+          return a;
+        }
+      } else {
+        a.status = 'idle';
+      }
+    }
+
     // Assign target if idle/waiting
     if (a.status === 'idle' || a.status === 'waiting') {
       a.velocity = 0;
@@ -509,6 +573,21 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         } else {
           target = unclaimed.reduce((best, dp) => distance(a.x, a.y, dp.x, dp.y) < distance(a.x, a.y, best.x, best.y) ? dp : best);
         }
+
+        // Target Availability Check
+        const targetKey = cellKey(target.x, target.y);
+        if (currentOccupied.has(targetKey)) {
+          a.targetX = target.x;
+          a.targetY = target.y;
+          a.status = 'waiting_target';
+          a.confidence = 'waiting_target';
+          a.velocity = 0;
+          target.claimed = true;
+          target.claimedBy = a.id;
+          desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+          return a;
+        }
+
         a.targetX = target.x;
         a.targetY = target.y;
         const dynamicCosts = buildBufferCosts(newState.agents, a.id);
@@ -528,7 +607,23 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       }
     }
 
-    // Moving agents: follow persisted path unless blocked for long enough
+    // === Smart Arrival: 1 cell from target & target occupied → wait_target ===
+    if (a.status === 'moving' && a.targetX !== null && a.targetY !== null) {
+      const distToTarget = distance(a.x, a.y, a.targetX, a.targetY);
+      if (distToTarget <= 1) {
+        const targetKey = cellKey(a.targetX, a.targetY);
+        if (currentOccupied.has(targetKey)) {
+          a.status = 'waiting_target';
+          a.confidence = 'waiting_target';
+          a.velocity = 0;
+          a.path = [];
+          desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+          return a;
+        }
+      }
+    }
+
+    // Moving agents: follow persisted path
     if (a.status === 'moving' && a.path.length > 0) {
       const next = a.path[0];
       desiredMoves.push({ agent: a, nextX: next.x, nextY: next.y, action: 'move', priority: priorityDistance });
