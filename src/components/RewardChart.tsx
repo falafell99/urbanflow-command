@@ -15,7 +15,7 @@ export default function RewardChart({ state }: Props) {
   }));
 
   return (
-    <div className="panel p-5 h-full flex flex-col overflow-hidden" style={{ maxHeight: '320px' }}>
+    <div className="panel p-5 h-full flex flex-col overflow-hidden">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-sm font-medium text-foreground">System Performance</h3>
         <div className="flex items-center gap-4 text-[11px] text-muted-foreground font-mono">

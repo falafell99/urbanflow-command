@@ -11,7 +11,7 @@ interface Props {
   onSelectAgent: (id: number | null) => void;
 }
 
-function AssetMarker({ agent, cellSize, selected, onSelect }: { agent: Agent; cellSize: number; selected: boolean; onSelect: () => void }) {
+function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: Agent; cellSize: number; selected: boolean; dimmed: boolean; onSelect: () => void }) {
   const statusColor = agent.status === 'moving'
     ? 'hsl(var(--primary))'
     : agent.status === 'delivering'
@@ -27,16 +27,17 @@ function AssetMarker({ agent, cellSize, selected, onSelect }: { agent: Agent; ce
           animate={{
             left: `${(agent.x + 0.5) * cellSize - 0.6}%`,
             top: `${(agent.y + 0.5) * cellSize - 0.6}%`,
+            opacity: dimmed ? 0.25 : 1,
           }}
           transition={{ duration: 0.15, ease: 'linear' }}
           style={{ width: '1.2%', height: '1.2%' }}
         >
-          {/* Selection ring */}
           {selected && (
             <motion.div
               className="absolute -inset-[6px] rounded-full border-2 border-primary"
               initial={{ scale: 0.5, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
+              animate={{ scale: [1, 1.2, 1], opacity: 1 }}
+              transition={{ scale: { repeat: Infinity, duration: 1.5 } }}
               style={{ boxShadow: '0 0 8px hsl(var(--primary) / 0.3)' }}
             />
           )}
@@ -62,6 +63,7 @@ function AssetMarker({ agent, cellSize, selected, onSelect }: { agent: Agent; ce
 
 export default function SimulationViewport({ state, selectedAgentId, onSelectAgent }: Props) {
   const cellSize = useMemo(() => 100 / GRID_SIZE, []);
+  const hasSelection = selectedAgentId !== null;
 
   const roads = useMemo(() => {
     const h: number[] = [];
@@ -129,14 +131,19 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
             const x2 = (next.x + 0.5) * cellSize;
             const y2 = (next.y + 0.5) * cellSize;
             return (
-              <div
+              <motion.div
                 key={`path-${agent.id}-${i}`}
-                className={isSelected ? 'absolute bg-primary/40' : 'absolute bg-primary/20'}
+                className="absolute"
+                animate={{
+                  opacity: isSelected ? [0.4, 0.7, 0.4] : hasSelection ? 0.05 : 0.2,
+                }}
+                transition={isSelected ? { repeat: Infinity, duration: 1.2 } : { duration: 0.3 }}
                 style={{
                   left: `${Math.min(x1, x2)}%`,
                   top: `${Math.min(y1, y2)}%`,
-                  width: x1 === x2 ? '1px' : `${Math.abs(x2 - x1)}%`,
-                  height: y1 === y2 ? '1px' : `${Math.abs(y2 - y1)}%`,
+                  width: x1 === x2 ? '2px' : `${Math.abs(x2 - x1)}%`,
+                  height: y1 === y2 ? '2px' : `${Math.abs(y2 - y1)}%`,
+                  backgroundColor: isSelected ? 'hsl(var(--primary))' : 'hsl(var(--primary))',
                 }}
               />
             );
@@ -149,7 +156,7 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
           key={dp.id}
           className="absolute"
           initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
+          animate={{ scale: 1, opacity: hasSelection ? 0.3 : 1 }}
           style={{
             left: `${(dp.x + 0.5) * cellSize - 0.7}%`,
             top: `${(dp.y + 0.5) * cellSize - 0.7}%`,
@@ -168,6 +175,7 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
           agent={agent}
           cellSize={cellSize}
           selected={agent.id === selectedAgentId}
+          dimmed={hasSelection && agent.id !== selectedAgentId}
           onSelect={() => onSelectAgent(agent.id === selectedAgentId ? null : agent.id)}
         />
       ))}
