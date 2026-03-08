@@ -66,7 +66,7 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
   );
 }
 
-export default function SimulationViewport({ state, selectedAgentId, onSelectAgent, heatmapVisible, onToggleHeatmap }: Props) {
+export default function SimulationViewport({ state, selectedAgentId, onSelectAgent, heatmapVisible, onToggleHeatmap, onToggleBlock }: Props) {
   const cellSize = useMemo(() => 100 / GRID_SIZE, []);
   const hasSelection = selectedAgentId !== null;
 
