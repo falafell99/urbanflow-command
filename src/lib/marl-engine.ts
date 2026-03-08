@@ -351,7 +351,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
           agent.x = jitterX;
           agent.y = jitterY;
           if (agent.targetX !== null && agent.targetY !== null) {
-            agent.path = simplePath(agent.x, agent.y, agent.targetX, agent.targetY, newState.blockedIntersections);
+            agent.path = simplePath(agent.x, agent.y, agent.targetX, agent.targetY, newState.blockedIntersections, newState.manualBlocks);
           }
           newState.logs.push({ tick: newState.tick, agentId: agent.id, message: `Conflict at ${key} — rerouting via avoidance protocol`, type: 'warning' });
         }
