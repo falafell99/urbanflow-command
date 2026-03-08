@@ -47,6 +47,7 @@ export interface SimState {
   logs: LogEntry[];
   scenario: Scenario;
   blockedIntersections: BlockedIntersection[];
+  manualBlocks: { x: number; y: number }[];
   decisionHeatmap: number[][];
 }
 
