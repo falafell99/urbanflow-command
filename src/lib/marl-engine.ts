@@ -426,19 +426,36 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   let tickDeliveries = 0;
   let tickCollisions = 0;
 
-  // Spawn deliveries
+  // Spawn deliveries with reachability validation
   const spawnRate = state.scenario === 'peak' ? 0.3 : 0.15;
   if (newState.deliveryPoints.length < MAX_DELIVERIES && Math.random() < spawnRate) {
-    const dp: DeliveryPoint = {
-      id: newState.tick * 100 + randInt(100),
-      x: randInt(GRID_SIZE),
-      y: randInt(GRID_SIZE),
-      spawnTime: newState.tick,
-      timeout: DELIVERY_TIMEOUT,
-      claimed: false,
-      claimedBy: null,
-    };
-    newState.deliveryPoints = [...newState.deliveryPoints, dp];
+    let attempts = 0;
+    let validTarget = false;
+    let tx = 0, ty = 0;
+    while (attempts < 10 && !validTarget) {
+      tx = randInt(GRID_SIZE);
+      ty = randInt(GRID_SIZE);
+      if (!isTargetTrapped(tx, ty, newState.blockedIntersections, newState.manualBlocks)) {
+        // Quick reachability: check that at least one agent can reach it
+        const anyReachable = newState.agents.some(ag =>
+          isReachable(ag.x, ag.y, tx, ty, newState.blockedIntersections, newState.manualBlocks)
+        );
+        if (anyReachable) validTarget = true;
+      }
+      attempts++;
+    }
+    if (validTarget) {
+      const dp: DeliveryPoint = {
+        id: newState.tick * 100 + randInt(100),
+        x: tx,
+        y: ty,
+        spawnTime: newState.tick,
+        timeout: DELIVERY_TIMEOUT,
+        claimed: false,
+        claimedBy: null,
+      };
+      newState.deliveryPoints = [...newState.deliveryPoints, dp];
+    }
   }
 
   // Emergency: periodically re-block intersections
