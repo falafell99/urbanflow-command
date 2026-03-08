@@ -19,6 +19,7 @@ export interface Agent {
   confidence: 'clear' | 'recalculating' | 'blocked';
   prevPositions: { x: number; y: number }[];
   backoffTicks: number;
+  stuckTicks: number;
 }
 
 export interface DeliveryPoint {
