@@ -13,16 +13,18 @@ export interface Agent {
   deliveries: number;
   collisions: number;
   waitTime: number;
-  status: 'idle' | 'moving' | 'delivering' | 'waiting' | 'waiting_target';
+  status: 'idle' | 'moving' | 'delivering' | 'waiting' | 'waiting_target' | 'stuck';
   velocity: number;
   energy: number;
-  confidence: 'clear' | 'recalculating' | 'blocked' | 'waiting_target';
+  confidence: 'clear' | 'recalculating' | 'blocked' | 'waiting_target' | 'stuck';
   prevPositions: { x: number; y: number }[];
   backoffTicks: number;
   stuckTicks: number;
   oscillationCycles: number;
   directionChanges: number;
   coolingTicks: number;
+  lastPathTick: number;
+  freezeTicks: number;
 }
 
 export interface DeliveryPoint {
