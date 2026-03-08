@@ -61,6 +61,8 @@ export interface Hyperparams {
   learningRate: number;
   discountFactor: number;
   explorationRate: number;
+  collisionPenalty: number;
+  speedVsSafety: 'speed' | 'safety';
 }
 
 const GRID_SIZE = 20;
