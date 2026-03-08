@@ -199,7 +199,7 @@ export default function Index() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.45 }} className="lg:col-span-3">
             <HyperparamPanel
               params={params}
-              onChange={setParams}
+              onChange={handleParamsChange}
               congestionMode={congestionMode}
               onCongestionToggle={setCongestionMode}
             />
