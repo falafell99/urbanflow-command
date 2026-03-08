@@ -744,7 +744,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         a.targetX = target.x;
         a.targetY = target.y;
         a.lastPathTick = newState.tick;
-        const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
         a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.pathCandidates = generatePathCandidates(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.status = 'moving';
