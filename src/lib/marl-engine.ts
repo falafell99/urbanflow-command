@@ -172,6 +172,7 @@ const DIRECTION_WINDOW = 5;
 const FREEZE_PERIOD = 15;
 const PATH_DEBOUNCE_TICKS = 5;
 const REPULSION_RANGE = 2;
+const OBSTACLE_ADJACENCY_COST = 4;
 
 function cellKey(x: number, y: number) {
   return `${x},${y}`;
@@ -184,6 +185,8 @@ function isBlocked(x: number, y: number, blocked: BlockedIntersection[], manualB
 function buildBufferCosts(
   agents: Agent[],
   selfId: number,
+  blocked: BlockedIntersection[] = [],
+  manualBlocks: { x: number; y: number }[] = [],
   boostedCell?: { x: number; y: number }
 ): Map<string, number> {
   const costs = new Map<string, number>();
@@ -197,6 +200,19 @@ function buildBufferCosts(
   if (boostedCell) {
     const key = cellKey(boostedCell.x, boostedCell.y);
     costs.set(key, Math.max(costs.get(key) ?? 0, WIDE_REROUTE_PENALTY));
+  }
+
+  // Obstacle adjacency avoidance: cells next to blocked cells get extra cost
+  const allBlocked = [...blocked, ...manualBlocks];
+  for (const b of allBlocked) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = b.x + dx;
+      const ny = b.y + dy;
+      if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+      if (isBlocked(nx, ny, blocked, manualBlocks)) continue;
+      const key = cellKey(nx, ny);
+      costs.set(key, Math.max(costs.get(key) ?? 0, OBSTACLE_ADJACENCY_COST));
+    }
   }
 
   return costs;
@@ -490,6 +506,37 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     });
   }
 
+  // === DYNAMIC PATH INVALIDATION: check if any agent's path crosses a blocked cell ===
+  newState.agents = newState.agents.map(a => {
+    if (a.status !== 'moving' || a.path.length === 0) return a;
+    const pathHitsBlock = a.path.some(p => isBlocked(p.x, p.y, newState.blockedIntersections, newState.manualBlocks));
+    if (!pathHitsBlock) return a;
+    if (a.targetX !== null && a.targetY !== null) {
+      const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
+      const newPath = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+      newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Path Invalidated]: Obstacle on route — immediate A* recalculation`, type: 'warning' });
+      return { ...a, path: newPath, confidence: 'recalculating' as const, lastPathTick: newState.tick };
+    }
+    return { ...a, path: [], status: 'idle' as const };
+  });
+
+  // === EVACUATION: if an agent is standing on a blocked cell, move it out ===
+  newState.agents = newState.agents.map(a => {
+    if (!isBlocked(a.x, a.y, newState.blockedIntersections, newState.manualBlocks)) return a;
+    const occupiedSet = new Set(newState.agents.map(ag => cellKey(ag.x, ag.y)));
+    const escape = findClearanceCell(a, newState.blockedIntersections, newState.manualBlocks, occupiedSet, new Set());
+    if (escape) {
+      newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Evacuate]: Standing on blocked cell — moving to (${escape.x},${escape.y})`, type: 'error' });
+      const updated = { ...a, x: escape.x, y: escape.y, path: [] as { x: number; y: number }[], confidence: 'recalculating' as const };
+      if (updated.targetX !== null && updated.targetY !== null) {
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
+        updated.path = simplePath(escape.x, escape.y, updated.targetX, updated.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+      }
+      return updated;
+    }
+    return a;
+  });
+
   // Expire deliveries
   newState.deliveryPoints = newState.deliveryPoints.filter(dp => {
     if (newState.tick - dp.spawnTime > dp.timeout) {
@@ -547,7 +594,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.confidence = 'stuck';
       // When freeze ends, recalculate path from scratch
       if (a.freezeTicks === 0 && a.targetX !== null && a.targetY !== null) {
-        const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
         a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.lastPathTick = newState.tick;
@@ -637,7 +684,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       if (a.targetX !== null && a.targetY !== null) {
         const targetKey = cellKey(a.targetX, a.targetY);
         if (!currentOccupied.has(targetKey)) {
-          const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+          const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
           a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
           a.status = 'moving';
           a.confidence = 'clear';
@@ -697,7 +744,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         a.targetX = target.x;
         a.targetY = target.y;
         a.lastPathTick = newState.tick;
-        const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
         a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.pathCandidates = generatePathCandidates(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.status = 'moving';
@@ -848,6 +895,14 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     if (!move || move.action !== 'move') continue;
 
     const key = cellKey(move.nextX, move.nextY);
+
+    // CRITICAL: prevent movement into blocked cells (movement-loop check)
+    if (isBlocked(move.nextX, move.nextY, newState.blockedIntersections, newState.manualBlocks)) {
+      blockedAgentIndices.add(i);
+      tickCollisions++;
+      continue;
+    }
+
     if (!stationaryCells.has(key)) continue;
 
     const clearance = findClearanceCell(
@@ -889,7 +944,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       // Wide reroute only after sustained blockage
       if (a.stuckTicks > BLOCKED_REROUTE_THRESHOLD && a.targetX !== null && a.targetY !== null) {
         const blockingCell = { x: move.nextX, y: move.nextY };
-        const dynamicCosts = buildBufferCosts(updatedAgents, a.id, blockingCell);
+        const dynamicCosts = buildBufferCosts(updatedAgents, a.id, newState.blockedIntersections, newState.manualBlocks, blockingCell);
         a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.stuckTicks = 0;
@@ -915,7 +970,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         // Path debounce: only recalculate every PATH_DEBOUNCE_TICKS
         if (newState.tick - (a.lastPathTick || 0) >= PATH_DEBOUNCE_TICKS) {
           a.lastPathTick = newState.tick;
-          const dynamicCosts = buildBufferCosts(updatedAgents, a.id);
+          const dynamicCosts = buildBufferCosts(updatedAgents, a.id, newState.blockedIntersections, newState.manualBlocks);
           a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
           a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         }
