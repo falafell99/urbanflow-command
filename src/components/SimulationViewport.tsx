@@ -80,7 +80,16 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
   }, []);
 
   return (
-    <div className="panel relative w-full aspect-square overflow-hidden" onClick={() => onSelectAgent(null)}>
+    <div className="panel relative w-full aspect-square overflow-hidden" onClick={(e) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const relX = (e.clientX - rect.left) / rect.width;
+      const relY = (e.clientY - rect.top) / rect.height;
+      const gridX = Math.floor(relX * GRID_SIZE);
+      const gridY = Math.floor(relY * GRID_SIZE);
+      if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
+        onToggleBlock(gridX, gridY);
+      }
+    }}>
       {/* Header */}
       <div className="absolute top-3 left-4 z-10 flex items-center gap-2">
         <div className="w-1.5 h-1.5 rounded-full bg-primary" />
