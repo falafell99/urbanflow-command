@@ -736,6 +736,36 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     return a;
   });
 
+  // === NEIGHBOR REPULSION: Process repulsion requests ===
+  for (const req of repulsionRequests) {
+    for (let i = 0; i < updatedAgents.length; i++) {
+      const neighbor = updatedAgents[i];
+      if (neighbor.id === req.fromId) continue;
+      if (neighbor.status !== 'idle' && neighbor.status !== 'waiting') continue;
+      const distToRepulsor = distance(neighbor.x, neighbor.y, req.targetX, req.targetY);
+      if (distToRepulsor > REPULSION_RANGE) continue;
+
+      // Find nearest empty cell away from the target
+      const clearance = findClearanceCell(
+        neighbor,
+        newState.blockedIntersections,
+        newState.manualBlocks,
+        currentOccupied,
+        new Set<string>()
+      );
+      if (clearance) {
+        desiredMoves[i] = {
+          agent: neighbor,
+          nextX: clearance.x,
+          nextY: clearance.y,
+          action: 'move',
+          priority: Number.POSITIVE_INFINITY,
+        };
+        newState.logs.push({ tick: newState.tick, agentId: neighbor.id, message: `[Yield]: Repulsion signal received — clearing path for Agent ${String(req.fromId).padStart(3, '0')}`, type: 'info' });
+      }
+    }
+  }
+
   // === CELL RESERVATION SYSTEM ===
   const reservations = new Map<string, number[]>();
   for (let i = 0; i < desiredMoves.length; i++) {
