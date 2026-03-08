@@ -350,6 +350,55 @@ function detectOscillation(positions: { x: number; y: number }[]): boolean {
   return uniquePositions.size <= 2;
 }
 
+// BFS reachability check: can we reach (tx,ty) from (sx,sy)?
+function isReachable(
+  sx: number, sy: number, tx: number, ty: number,
+  blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[]
+): boolean {
+  if (sx === tx && sy === ty) return true;
+  if (isBlocked(tx, ty, blocked, manualBlocks)) return false;
+
+  const visited = new Set<string>();
+  const queue: { x: number; y: number }[] = [{ x: tx, y: ty }];
+  visited.add(cellKey(tx, ty));
+
+  // Quick flood fill from target to check if agent position is reachable
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (cur.x === sx && cur.y === sy) return true;
+
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cur.x + dx;
+      const ny = cur.y + dy;
+      if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+      const nk = cellKey(nx, ny);
+      if (visited.has(nk)) continue;
+      if (isBlocked(nx, ny, blocked, manualBlocks)) continue;
+      visited.add(nk);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return false;
+}
+
+// Check if a target cell is surrounded (unreachable from all 4 sides)
+function isTargetTrapped(
+  tx: number, ty: number,
+  blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[]
+): boolean {
+  if (isBlocked(tx, ty, blocked, manualBlocks)) return true;
+  // Check if all 4 neighbors are blocked or out of bounds
+  let accessibleNeighbors = 0;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = tx + dx;
+    const ny = ty + dy;
+    if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE && !isBlocked(nx, ny, blocked, manualBlocks)) {
+      accessibleNeighbors++;
+    }
+  }
+  return accessibleNeighbors === 0;
+}
+
 // AI-driven log messages
 const cooperativeMessages = [
   "Switched to 'Cooperative Mode' to resolve deadlock",
