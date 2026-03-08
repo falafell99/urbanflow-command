@@ -7,7 +7,7 @@
 ### 🚀 Quick Links
 | 🌐 Live Simulation | 📂 Source Code | 🛠 AI Framework |
 | :--- | :--- | :--- |
-| [**Deploy on Vercel**](https://urbanflow-command.vercel.app) | [**Repository**](https://github.com/rafael-ibayev/rafael-ibayev-portfolio) | ![PPO-Stable](https://img.shields.io/badge/Algorithm-PPO--CTDE-3b82f6) |
+| [**Deploy on Vercel**](https://urbanflow-command.vercel.app) | [**Repository**](https://github.com/falafell99/urbanflow-command.git) | ![PPO-Stable](https://img.shields.io/badge/Algorithm-PPO--CTDE-3b82f6) |
 
 ---
 
