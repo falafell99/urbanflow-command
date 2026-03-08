@@ -453,40 +453,46 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       prevPositions: [...agent.prevPositions, { x: agent.x, y: agent.y }].slice(-OSCILLATION_WINDOW),
     };
 
+    const priorityDistance = a.targetX !== null && a.targetY !== null
+      ? distance(a.x, a.y, a.targetX, a.targetY)
+      : Number.POSITIVE_INFINITY;
+
     // Handle backoff cooldown
     if (a.backoffTicks > 0) {
       a.backoffTicks--;
       a.status = 'waiting';
       a.velocity = 0;
       a.confidence = 'recalculating';
-      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait' });
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
       return a;
     }
 
-    // Detect oscillation → stochastic backoff
+    // Deadlock resolver: oscillation cycles -> forced random sidestep
     if (a.status === 'moving' && detectOscillation(a.prevPositions)) {
-      a.backoffTicks = 1 + randInt(2);
-      a.status = 'waiting';
-      a.velocity = 0;
-      a.confidence = 'recalculating';
-      a.stuckTicks = 0;
-      // Pick a random adjacent cell to break deadlock
-      const dirs = [
-        { x: a.x + 1, y: a.y }, { x: a.x - 1, y: a.y },
-        { x: a.x, y: a.y + 1 }, { x: a.x, y: a.y - 1 },
+      a.oscillationCycles = (a.oscillationCycles || 0) + 1;
+    } else {
+      a.oscillationCycles = 0;
+    }
+
+    if (a.oscillationCycles > OSCILLATION_CYCLE_THRESHOLD) {
+      const sideSteps = [
+        { x: a.x + 1, y: a.y },
+        { x: a.x - 1, y: a.y },
+        { x: a.x, y: a.y + 1 },
+        { x: a.x, y: a.y - 1 },
       ].filter(d => d.x >= 0 && d.x < GRID_SIZE && d.y >= 0 && d.y < GRID_SIZE
         && !isBlocked(d.x, d.y, newState.blockedIntersections, newState.manualBlocks));
-      if (dirs.length > 0) {
-        const pick = dirs[randInt(dirs.length)];
-        desiredMoves.push({ agent: a, nextX: pick.x, nextY: pick.y, action: 'move' });
+
+      if (sideSteps.length > 0) {
+        const pick = sideSteps[randInt(sideSteps.length)];
+        desiredMoves.push({ agent: a, nextX: pick.x, nextY: pick.y, action: 'move', priority: priorityDistance });
+        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Side-step]: Oscillation persisted — forcing random symmetry break`, type: 'warning' });
       } else {
-        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait' });
+        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
       }
-      if (a.targetX !== null && a.targetY !== null) {
-        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks);
-        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks);
-      }
-      newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Backoff]: Oscillation detected — stochastic repositioning`, type: 'warning' });
+      a.oscillationCycles = 0;
+      a.confidence = 'recalculating';
+      a.velocity = 0;
       return a;
     }
 
@@ -505,8 +511,9 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         }
         a.targetX = target.x;
         a.targetY = target.y;
-        a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks);
-        a.pathCandidates = generatePathCandidates(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks);
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+        a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.status = 'moving';
         a.velocity = 1.0;
         a.confidence = 'clear';
@@ -516,17 +523,17 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       } else {
         a.waitTime++;
         a.status = 'idle';
-        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle' });
+        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle', priority: priorityDistance });
         return a;
       }
     }
 
-    // Moving agents: determine desired next cell
+    // Moving agents: follow persisted path unless blocked for long enough
     if (a.status === 'moving' && a.path.length > 0) {
       const next = a.path[0];
-      desiredMoves.push({ agent: a, nextX: next.x, nextY: next.y, action: 'move' });
+      desiredMoves.push({ agent: a, nextX: next.x, nextY: next.y, action: 'move', priority: priorityDistance });
     } else {
-      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle' });
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle', priority: priorityDistance });
     }
 
     return a;
