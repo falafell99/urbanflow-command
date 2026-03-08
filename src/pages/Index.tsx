@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { Play, Pause, RotateCcw, Github } from 'lucide-react';
 import { Button } from '@/components/ui/button';
