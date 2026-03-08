@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Play, Pause, RotateCcw } from 'lucide-react';
+import { Play, Pause, RotateCcw, Settings } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import SimulationViewport from '@/components/SimulationViewport';
 import RewardChart from '@/components/RewardChart';
@@ -9,6 +9,7 @@ import AgentLogs from '@/components/AgentLogs';
 import HyperparamPanel from '@/components/HyperparamPanel';
 import TechArchitecture from '@/components/TechArchitecture';
 import StatsBar from '@/components/StatsBar';
+import AssetTable from '@/components/AssetTable';
 import { createInitialState, stepSimulation, type Hyperparams, type SimState } from '@/lib/marl-engine';
 
 export default function Index() {
@@ -38,28 +39,24 @@ export default function Index() {
   };
 
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6">
+    <div className="min-h-screen bg-background">
       {/* Header */}
-      <motion.header
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between mb-6"
-      >
-        <div>
-          <h1 className="text-xl font-bold tracking-tight">
-            <span className="neon-text-cyan">UrbanFlow</span>{' '}
-            <span className="text-foreground/60">AI</span>
+      <header className="border-b border-border px-6 h-14 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-2 h-2 rounded-full bg-primary" />
+          <h1 className="text-sm font-semibold tracking-tight text-foreground">
+            UrbanFlow AI
           </h1>
-          <p className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase mt-0.5">
-            Multi-Agent Reinforcement Learning Simulator
-          </p>
+          <span className="text-xs text-muted-foreground font-mono hidden sm:inline">
+            Fleet Coordination System v2.4
+          </span>
         </div>
         <div className="flex items-center gap-2">
           <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
             onClick={reset}
-            className="border-border/50 text-muted-foreground hover:text-foreground"
+            className="text-muted-foreground hover:text-foreground h-8"
           >
             <RotateCcw className="w-3.5 h-3.5" />
           </Button>
@@ -67,76 +64,58 @@ export default function Index() {
             size="sm"
             onClick={() => setRunning(!running)}
             className={running
-              ? 'bg-neon-purple/20 text-neon-purple border border-neon-purple/30 hover:bg-neon-purple/30'
-              : 'bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/30 hover:bg-neon-cyan/30'
+              ? 'bg-destructive/10 text-destructive border border-destructive/20 hover:bg-destructive/20 h-8'
+              : 'bg-primary text-primary-foreground hover:bg-primary/90 h-8'
             }
           >
             {running ? <Pause className="w-3.5 h-3.5 mr-1.5" /> : <Play className="w-3.5 h-3.5 mr-1.5" />}
-            {running ? 'Pause' : 'Start'}
+            {running ? 'Pause' : 'Start Simulation'}
           </Button>
         </div>
-      </motion.header>
+      </header>
 
-      {/* Stats Bar */}
-      <div className="mb-4">
+      <div className="p-6 space-y-4">
+        {/* Stats Bar */}
         <StatsBar state={state} />
-      </div>
 
-      {/* Main Bento Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Simulation Viewport */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.1 }}
-          className="lg:col-span-7"
-        >
-          <SimulationViewport state={state} />
-        </motion.div>
-
-        {/* Right Panel */}
-        <div className="lg:col-span-5 grid grid-rows-[1fr_1fr] gap-4" style={{ minHeight: 0 }}>
+        {/* Main Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          {/* Simulation Viewport */}
           <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.2 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.1 }}
+            className="lg:col-span-7"
           >
-            <RewardChart state={state} />
+            <SimulationViewport state={state} />
           </motion.div>
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.3 }}
-          >
-            <AgentLogs logs={state.logs} />
+
+          {/* Right Panel */}
+          <div className="lg:col-span-5 grid grid-rows-[1fr_1fr] gap-4" style={{ minHeight: 0 }}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
+              <RewardChart state={state} />
+            </motion.div>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
+              <AgentLogs logs={state.logs} />
+            </motion.div>
+          </div>
+
+          {/* Bottom Row */}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="lg:col-span-3">
+            <EfficiencyGauge state={state} />
+          </motion.div>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="lg:col-span-3">
+            <HyperparamPanel params={params} onChange={setParams} />
+          </motion.div>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }} className="lg:col-span-6">
+            <AssetTable state={state} />
+          </motion.div>
+
+          {/* Architecture */}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }} className="lg:col-span-12">
+            <TechArchitecture />
           </motion.div>
         </div>
-
-        {/* Bottom Row */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.4 }}
-          className="lg:col-span-3"
-        >
-          <EfficiencyGauge state={state} />
-        </motion.div>
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="lg:col-span-4"
-        >
-          <HyperparamPanel params={params} onChange={setParams} />
-        </motion.div>
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.6 }}
-          className="lg:col-span-5"
-        >
-          <TechArchitecture />
-        </motion.div>
       </div>
     </div>
   );
