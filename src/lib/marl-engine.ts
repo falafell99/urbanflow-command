@@ -433,7 +433,13 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   }
 
   // === PHASE 1: CALCULATION — All agents decide their desired next cell ===
-  const desiredMoves: { agent: Agent; nextX: number; nextY: number; action: 'move' | 'deliver' | 'idle' | 'wait' }[] = [];
+  const desiredMoves: {
+    agent: Agent;
+    nextX: number;
+    nextY: number;
+    action: 'move' | 'deliver' | 'idle' | 'wait';
+    priority: number;
+  }[] = [];
   
   // Build current occupation map
   const currentOccupied = new Set<string>();
