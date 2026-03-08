@@ -163,6 +163,9 @@ const BUFFER_ZONE_COST = 6;
 const BLOCKED_REROUTE_THRESHOLD = 5;
 const OSCILLATION_CYCLE_THRESHOLD = 3;
 const MAX_ASTAR_ITERATIONS = 800;
+const DIRECTION_CHANGE_LIMIT = 3;
+const DIRECTION_WINDOW = 5;
+const COOLING_PERIOD = 10;
 
 function cellKey(x: number, y: number) {
   return `${x},${y}`;
