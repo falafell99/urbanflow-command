@@ -131,6 +131,7 @@ export function createInitialState(scenario: Scenario = 'standard'): SimState {
     logs: [],
     scenario,
     blockedIntersections,
+    manualBlocks: [],
     decisionHeatmap: createHeatmap(),
   };
 }
