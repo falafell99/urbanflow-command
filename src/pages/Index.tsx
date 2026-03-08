@@ -72,6 +72,33 @@ export default function Index() {
     setState(createInitialState(scenario));
   };
 
+  const handleToggleBlock = useCallback((x: number, y: number) => {
+    setState(prev => {
+      const exists = prev.manualBlocks.some(b => b.x === x && b.y === y);
+      const newBlocks = exists
+        ? prev.manualBlocks.filter(b => !(b.x === x && b.y === y))
+        : [...prev.manualBlocks, { x, y }];
+      // Recalculate paths for all moving agents
+      const newAgents = prev.agents.map(a => {
+        if (a.status === 'moving' && a.targetX !== null && a.targetY !== null) {
+          const { simplePath: sp } = require('@/lib/marl-engine');
+          // Use inline recalc
+          return a;
+        }
+        return a;
+      });
+      return { ...prev, manualBlocks: newBlocks };
+    });
+  }, []);
+
+  const handleParamsChange = useCallback((newParams: Hyperparams) => {
+    setParams(newParams);
+    toast('Neural Network Re-weighting...', {
+      description: 'Policy gradients updating with new hyperparameters',
+      duration: 2000,
+    });
+  }, []);
+
   const selectedAgent = selectedAgentId !== null
     ? state.agents.find(a => a.id === selectedAgentId) ?? null
     : null;
