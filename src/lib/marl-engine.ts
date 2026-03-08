@@ -13,7 +13,7 @@ export interface Agent {
   deliveries: number;
   collisions: number;
   waitTime: number;
-  status: 'idle' | 'moving' | 'delivering' | 'waiting';
+  status: 'idle' | 'moving' | 'delivering' | 'waiting' | 'waiting_target';
   velocity: number;
   energy: number;
   confidence: 'clear' | 'recalculating' | 'blocked';
