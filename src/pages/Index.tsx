@@ -111,19 +111,19 @@ export default function Index() {
           </motion.div>
 
           {/* Right Panel */}
-          <div className="lg:col-span-5 grid grid-rows-[auto_1fr_1fr] gap-4" style={{ minHeight: 0 }}>
+          <div className="lg:col-span-5 grid lg:grid-rows-[minmax(0,220px)_minmax(0,260px)_minmax(0,1fr)] gap-4 lg:h-[720px] min-h-0 overflow-hidden">
             {/* Active Inspector */}
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="min-h-0">
               <ActiveInspector
                 agent={selectedAgent}
                 tick={state.tick}
                 onClose={() => setSelectedAgentId(null)}
               />
             </motion.div>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="min-h-0">
               <RewardChart state={state} />
             </motion.div>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="min-h-0 overflow-hidden">
               <AgentLogs logs={state.logs} />
             </motion.div>
           </div>
