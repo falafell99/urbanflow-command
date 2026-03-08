@@ -16,6 +16,7 @@ const statusLabels: Record<string, { label: string; className: string }> = {
   moving: { label: 'In Transit', className: 'text-primary' },
   delivering: { label: 'Delivering', className: 'text-success' },
   idle: { label: 'Idle', className: 'text-muted-foreground' },
+  waiting: { label: 'Backoff', className: 'text-warning' },
 };
 
 export default function AssetTable({ state }: Props) {

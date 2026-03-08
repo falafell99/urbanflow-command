@@ -14,6 +14,7 @@ const objectives: Record<string, string> = {
   moving: 'En route to target sector',
   delivering: 'Completing delivery handoff',
   idle: 'Awaiting task assignment',
+  waiting: 'Stochastic backoff — resolving deadlock',
 };
 
 export default function ActiveInspector({ agent, tick, onClose }: Props) {
