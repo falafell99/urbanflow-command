@@ -109,6 +109,7 @@ function createAgent(id: number): Agent {
     confidence: 'clear',
     prevPositions: [],
     backoffTicks: 0,
+    stuckTicks: 0,
   };
 }
 
