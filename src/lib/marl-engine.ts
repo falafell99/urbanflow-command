@@ -20,6 +20,7 @@ export interface Agent {
   prevPositions: { x: number; y: number }[];
   backoffTicks: number;
   stuckTicks: number;
+  oscillationCycles: number;
 }
 
 export interface DeliveryPoint {
@@ -110,6 +111,7 @@ function createAgent(id: number): Agent {
     prevPositions: [],
     backoffTicks: 0,
     stuckTicks: 0,
+    oscillationCycles: 0,
   };
 }
 
@@ -152,64 +154,179 @@ export function createInitialState(scenario: Scenario = 'standard'): SimState {
   };
 }
 
+const WIDE_REROUTE_PENALTY = 40;
+const BUFFER_ZONE_COST = 6;
+const BLOCKED_REROUTE_THRESHOLD = 5;
+const OSCILLATION_CYCLE_THRESHOLD = 3;
+const MAX_ASTAR_ITERATIONS = 800;
+
+function cellKey(x: number, y: number) {
+  return `${x},${y}`;
+}
+
 function isBlocked(x: number, y: number, blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[] = []): boolean {
   return blocked.some(b => b.x === x && b.y === y) || manualBlocks.some(b => b.x === x && b.y === y);
 }
 
-function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[] = [], manualBlocks: { x: number; y: number }[] = []): { x: number; y: number }[] {
-  const path: { x: number; y: number }[] = [];
-  let cx = ax, cy = ay;
-  while (cx !== tx || cy !== ty) {
-    let nx = cx, ny = cy;
-    if (cx < tx) nx = cx + 1;
-    else if (cx > tx) nx = cx - 1;
-    else if (cy < ty) ny = cy + 1;
-    else if (cy > ty) ny = cy - 1;
+function buildBufferCosts(
+  agents: Agent[],
+  selfId: number,
+  boostedCell?: { x: number; y: number }
+): Map<string, number> {
+  const costs = new Map<string, number>();
 
-    if (isBlocked(nx, ny, blocked, manualBlocks)) {
-      if (nx !== cx) {
-        if (cy < ty) ny = cy + 1;
-        else if (cy > ty) ny = cy - 1;
-        else ny = cy + (Math.random() > 0.5 ? 1 : -1);
-        nx = cx;
-        ny = Math.max(0, Math.min(19, ny));
-      } else {
-        if (cx < tx) nx = cx + 1;
-        else if (cx > tx) nx = cx - 1;
-        else nx = cx + (Math.random() > 0.5 ? 1 : -1);
-        ny = cy;
-        nx = Math.max(0, Math.min(19, nx));
+  for (const other of agents) {
+    if (other.id === selfId) continue;
+    const key = cellKey(other.x, other.y);
+    costs.set(key, Math.max(costs.get(key) ?? 0, BUFFER_ZONE_COST));
+  }
+
+  if (boostedCell) {
+    const key = cellKey(boostedCell.x, boostedCell.y);
+    costs.set(key, Math.max(costs.get(key) ?? 0, WIDE_REROUTE_PENALTY));
+  }
+
+  return costs;
+}
+
+function reconstructPath(cameFrom: Map<string, string>, targetKey: string): { x: number; y: number }[] {
+  const path: { x: number; y: number }[] = [];
+  let current: string | undefined = targetKey;
+
+  while (current) {
+    const [x, y] = current.split(',').map(Number);
+    path.push({ x, y });
+    current = cameFrom.get(current);
+  }
+
+  path.reverse();
+  return path.slice(1);
+}
+
+function simplePath(
+  ax: number,
+  ay: number,
+  tx: number,
+  ty: number,
+  blocked: BlockedIntersection[] = [],
+  manualBlocks: { x: number; y: number }[] = [],
+  dynamicCosts: Map<string, number> = new Map()
+): { x: number; y: number }[] {
+  if (ax === tx && ay === ty) return [];
+  if (isBlocked(tx, ty, blocked, manualBlocks)) return [];
+
+  const open = new Set<string>([cellKey(ax, ay)]);
+  const cameFrom = new Map<string, string>();
+  const gScore = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(Number.POSITIVE_INFINITY));
+  const fScore = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(Number.POSITIVE_INFINITY));
+
+  gScore[ay][ax] = 0;
+  fScore[ay][ax] = distance(ax, ay, tx, ty);
+
+  let iterations = 0;
+  while (open.size > 0 && iterations < MAX_ASTAR_ITERATIONS) {
+    iterations++;
+
+    let currentKey: string | null = null;
+    let bestF = Number.POSITIVE_INFINITY;
+
+    open.forEach((key) => {
+      const [x, y] = key.split(',').map(Number);
+      if (fScore[y][x] < bestF) {
+        bestF = fScore[y][x];
+        currentKey = key;
       }
-      if (isBlocked(nx, ny, blocked, manualBlocks)) {
-        break;
+    });
+
+    if (!currentKey) break;
+    const [cx, cy] = currentKey.split(',').map(Number);
+
+    if (cx === tx && cy === ty) {
+      return reconstructPath(cameFrom, currentKey);
+    }
+
+    open.delete(currentKey);
+
+    const neighbors = [
+      { x: cx + 1, y: cy },
+      { x: cx - 1, y: cy },
+      { x: cx, y: cy + 1 },
+      { x: cx, y: cy - 1 },
+    ];
+
+    for (const n of neighbors) {
+      if (n.x < 0 || n.x >= GRID_SIZE || n.y < 0 || n.y >= GRID_SIZE) continue;
+      if (isBlocked(n.x, n.y, blocked, manualBlocks)) continue;
+
+      const nKey = cellKey(n.x, n.y);
+      const stepCost = 1 + (dynamicCosts.get(nKey) ?? 0);
+      const tentative = gScore[cy][cx] + stepCost;
+
+      if (tentative < gScore[n.y][n.x]) {
+        cameFrom.set(nKey, currentKey);
+        gScore[n.y][n.x] = tentative;
+        fScore[n.y][n.x] = tentative + distance(n.x, n.y, tx, ty);
+        open.add(nKey);
       }
     }
-    cx = nx;
-    cy = ny;
-    path.push({ x: cx, y: cy });
-    if (path.length > 50) break;
   }
-  return path;
+
+  return [];
 }
 
 // Generate alternative path candidates for neural planning visualization
-function generatePathCandidates(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[]): { x: number; y: number }[][] {
+function generatePathCandidates(
+  ax: number,
+  ay: number,
+  tx: number,
+  ty: number,
+  blocked: BlockedIntersection[],
+  manualBlocks: { x: number; y: number }[],
+  dynamicCosts: Map<string, number> = new Map()
+): { x: number; y: number }[][] {
   const candidates: { x: number; y: number }[][] = [];
-  // Primary path
-  candidates.push(simplePath(ax, ay, tx, ty, blocked, manualBlocks));
-  // Alternative: go horizontal first
-  const midX = tx, midY = ay;
-  if (!isBlocked(midX, midY, blocked, manualBlocks)) {
-    const alt1 = [...simplePath(ax, ay, midX, midY, blocked, manualBlocks), ...simplePath(midX, midY, tx, ty, blocked, manualBlocks)];
-    if (alt1.length > 0) candidates.push(alt1.slice(0, 30));
-  }
-  // Alternative: go vertical first
-  const midX2 = ax, midY2 = ty;
-  if (!isBlocked(midX2, midY2, blocked, manualBlocks)) {
-    const alt2 = [...simplePath(ax, ay, midX2, midY2, blocked, manualBlocks), ...simplePath(midX2, midY2, tx, ty, blocked, manualBlocks)];
-    if (alt2.length > 0) candidates.push(alt2.slice(0, 30));
-  }
+
+  const primary = simplePath(ax, ay, tx, ty, blocked, manualBlocks, dynamicCosts);
+  if (primary.length > 0) candidates.push(primary);
+
+  const horizontalFirst = simplePath(ax, ay, tx, ay, blocked, manualBlocks, dynamicCosts);
+  const horizontalTail = simplePath(tx, ay, tx, ty, blocked, manualBlocks, dynamicCosts);
+  const alt1 = [...horizontalFirst, ...horizontalTail];
+  if (alt1.length > 0) candidates.push(alt1.slice(0, 40));
+
+  const verticalFirst = simplePath(ax, ay, ax, ty, blocked, manualBlocks, dynamicCosts);
+  const verticalTail = simplePath(ax, ty, tx, ty, blocked, manualBlocks, dynamicCosts);
+  const alt2 = [...verticalFirst, ...verticalTail];
+  if (alt2.length > 0) candidates.push(alt2.slice(0, 40));
+
   return candidates;
+}
+
+function findClearanceCell(
+  agent: Agent,
+  blocked: BlockedIntersection[],
+  manualBlocks: { x: number; y: number }[],
+  occupiedNow: Set<string>,
+  reservedTargets: Set<string>
+): { x: number; y: number } | null {
+  const neighbors = [
+    { x: agent.x + 1, y: agent.y },
+    { x: agent.x - 1, y: agent.y },
+    { x: agent.x, y: agent.y + 1 },
+    { x: agent.x, y: agent.y - 1 },
+  ]
+    .filter((n) => n.x >= 0 && n.x < GRID_SIZE && n.y >= 0 && n.y < GRID_SIZE)
+    .sort(() => Math.random() - 0.5);
+
+  for (const n of neighbors) {
+    if (isBlocked(n.x, n.y, blocked, manualBlocks)) continue;
+    const key = cellKey(n.x, n.y);
+    if (occupiedNow.has(key)) continue;
+    if (reservedTargets.has(key)) continue;
+    return n;
+  }
+
+  return null;
 }
 
 // Detect oscillation: agent bouncing between same positions
@@ -316,7 +433,13 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   }
 
   // === PHASE 1: CALCULATION — All agents decide their desired next cell ===
-  const desiredMoves: { agent: Agent; nextX: number; nextY: number; action: 'move' | 'deliver' | 'idle' | 'wait' }[] = [];
+  const desiredMoves: {
+    agent: Agent;
+    nextX: number;
+    nextY: number;
+    action: 'move' | 'deliver' | 'idle' | 'wait';
+    priority?: number;
+  }[] = [];
   
   // Build current occupation map
   const currentOccupied = new Set<string>();
@@ -330,40 +453,46 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       prevPositions: [...agent.prevPositions, { x: agent.x, y: agent.y }].slice(-OSCILLATION_WINDOW),
     };
 
+    const priorityDistance = a.targetX !== null && a.targetY !== null
+      ? distance(a.x, a.y, a.targetX, a.targetY)
+      : Number.POSITIVE_INFINITY;
+
     // Handle backoff cooldown
     if (a.backoffTicks > 0) {
       a.backoffTicks--;
       a.status = 'waiting';
       a.velocity = 0;
       a.confidence = 'recalculating';
-      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait' });
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
       return a;
     }
 
-    // Detect oscillation → stochastic backoff
+    // Deadlock resolver: oscillation cycles -> forced random sidestep
     if (a.status === 'moving' && detectOscillation(a.prevPositions)) {
-      a.backoffTicks = 1 + randInt(2);
-      a.status = 'waiting';
-      a.velocity = 0;
-      a.confidence = 'recalculating';
-      a.stuckTicks = 0;
-      // Pick a random adjacent cell to break deadlock
-      const dirs = [
-        { x: a.x + 1, y: a.y }, { x: a.x - 1, y: a.y },
-        { x: a.x, y: a.y + 1 }, { x: a.x, y: a.y - 1 },
+      a.oscillationCycles = (a.oscillationCycles || 0) + 1;
+    } else {
+      a.oscillationCycles = 0;
+    }
+
+    if (a.oscillationCycles > OSCILLATION_CYCLE_THRESHOLD) {
+      const sideSteps = [
+        { x: a.x + 1, y: a.y },
+        { x: a.x - 1, y: a.y },
+        { x: a.x, y: a.y + 1 },
+        { x: a.x, y: a.y - 1 },
       ].filter(d => d.x >= 0 && d.x < GRID_SIZE && d.y >= 0 && d.y < GRID_SIZE
         && !isBlocked(d.x, d.y, newState.blockedIntersections, newState.manualBlocks));
-      if (dirs.length > 0) {
-        const pick = dirs[randInt(dirs.length)];
-        desiredMoves.push({ agent: a, nextX: pick.x, nextY: pick.y, action: 'move' });
+
+      if (sideSteps.length > 0) {
+        const pick = sideSteps[randInt(sideSteps.length)];
+        desiredMoves.push({ agent: a, nextX: pick.x, nextY: pick.y, action: 'move', priority: priorityDistance });
+        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Side-step]: Oscillation persisted — forcing random symmetry break`, type: 'warning' });
       } else {
-        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait' });
+        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
       }
-      if (a.targetX !== null && a.targetY !== null) {
-        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks);
-        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks);
-      }
-      newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Backoff]: Oscillation detected — stochastic repositioning`, type: 'warning' });
+      a.oscillationCycles = 0;
+      a.confidence = 'recalculating';
+      a.velocity = 0;
       return a;
     }
 
@@ -382,8 +511,9 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         }
         a.targetX = target.x;
         a.targetY = target.y;
-        a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks);
-        a.pathCandidates = generatePathCandidates(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks);
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+        a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.status = 'moving';
         a.velocity = 1.0;
         a.confidence = 'clear';
@@ -393,69 +523,115 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       } else {
         a.waitTime++;
         a.status = 'idle';
-        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle' });
+        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle', priority: priorityDistance });
         return a;
       }
     }
 
-    // Moving agents: determine desired next cell
+    // Moving agents: follow persisted path unless blocked for long enough
     if (a.status === 'moving' && a.path.length > 0) {
       const next = a.path[0];
-      desiredMoves.push({ agent: a, nextX: next.x, nextY: next.y, action: 'move' });
+      desiredMoves.push({ agent: a, nextX: next.x, nextY: next.y, action: 'move', priority: priorityDistance });
     } else {
-      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle' });
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle', priority: priorityDistance });
     }
 
     return a;
   });
 
   // === CELL RESERVATION SYSTEM ===
-  // All agents that want to move compete for cell reservations
-  const reservations = new Map<string, number[]>(); // cellKey -> [agentIndices]
-  
+  const reservations = new Map<string, number[]>();
   for (let i = 0; i < desiredMoves.length; i++) {
     const move = desiredMoves[i];
-    if (move.action === 'move') {
-      const key = `${move.nextX},${move.nextY}`;
-      if (!reservations.has(key)) reservations.set(key, []);
-      reservations.get(key)!.push(i);
-    }
+    if (move.action !== 'move') continue;
+    const key = cellKey(move.nextX, move.nextY);
+    if (!reservations.has(key)) reservations.set(key, []);
+    reservations.get(key)!.push(i);
   }
 
-  // Resolve conflicts: lowest agent ID wins the reservation
   const blockedAgentIndices = new Set<number>();
-  reservations.forEach((indices) => {
-    if (indices.length > 1) {
-      // Sort by agent ID (lower = higher priority)
-      indices.sort((a, b) => desiredMoves[a].agent.id - desiredMoves[b].agent.id);
-      // First one wins, rest must wait
-      for (let k = 1; k < indices.length; k++) {
-        blockedAgentIndices.add(indices[k]);
-        tickCollisions++;
+  const reservedTargets = new Set<string>();
+
+  // Resolve reservation conflicts by priority: closer-to-target wins, then lower ID.
+  reservations.forEach((indices, key) => {
+    if (indices.length === 1) {
+      reservedTargets.add(key);
+      return;
+    }
+
+    indices.sort((a, b) => {
+      const pa = desiredMoves[a].priority ?? Number.POSITIVE_INFINITY;
+      const pb = desiredMoves[b].priority ?? Number.POSITIVE_INFINITY;
+      if (pa !== pb) return pa - pb;
+      return desiredMoves[a].agent.id - desiredMoves[b].agent.id;
+    });
+
+    const winner = indices[0];
+    reservedTargets.add(cellKey(desiredMoves[winner].nextX, desiredMoves[winner].nextY));
+
+    for (let k = 1; k < indices.length; k++) {
+      const loserIdx = indices[k];
+      const loser = updatedAgents[loserIdx];
+      const clearance = findClearanceCell(
+        loser,
+        newState.blockedIntersections,
+        newState.manualBlocks,
+        currentOccupied,
+        reservedTargets
+      );
+
+      if (clearance) {
+        desiredMoves[loserIdx] = {
+          ...desiredMoves[loserIdx],
+          nextX: clearance.x,
+          nextY: clearance.y,
+          action: 'move',
+        };
+        reservedTargets.add(cellKey(clearance.x, clearance.y));
+        continue;
       }
+
+      blockedAgentIndices.add(loserIdx);
+      tickCollisions++;
     }
   });
 
-  // Also check: is the target cell still occupied by an agent that isn't moving away?
-  const agentPositions = new Map<string, number>(); // cellKey -> agentId of agent staying
+  // Prevent entering cells occupied by agents that are not leaving this tick.
+  const stationaryCells = new Set<string>();
   for (let i = 0; i < updatedAgents.length; i++) {
     const move = desiredMoves[i];
-    if (!move) continue;
-    // If agent is NOT moving (waiting/idle/blocked), it occupies its current cell
-    if (move.action !== 'move' || blockedAgentIndices.has(i)) {
-      agentPositions.set(`${updatedAgents[i].x},${updatedAgents[i].y}`, updatedAgents[i].id);
+    if (!move || move.action !== 'move' || blockedAgentIndices.has(i)) {
+      stationaryCells.add(cellKey(updatedAgents[i].x, updatedAgents[i].y));
     }
   }
-  
-  // Check moving agents against stationary agents
+
   for (let i = 0; i < desiredMoves.length; i++) {
     if (blockedAgentIndices.has(i)) continue;
     const move = desiredMoves[i];
-    if (move.action !== 'move') continue;
-    const key = `${move.nextX},${move.nextY}`;
-    const occupant = agentPositions.get(key);
-    if (occupant !== undefined && occupant !== move.agent.id) {
+    if (!move || move.action !== 'move') continue;
+
+    const key = cellKey(move.nextX, move.nextY);
+    if (!stationaryCells.has(key)) continue;
+
+    const clearance = findClearanceCell(
+      updatedAgents[i],
+      newState.blockedIntersections,
+      newState.manualBlocks,
+      currentOccupied,
+      reservedTargets
+    );
+
+    if (clearance) {
+      desiredMoves[i] = {
+        ...desiredMoves[i],
+        nextX: clearance.x,
+        nextY: clearance.y,
+        action: 'move',
+      };
+      reservedTargets.add(cellKey(clearance.x, clearance.y));
+    } else {
       blockedAgentIndices.add(i);
+      tickCollisions++;
     }
   }
 
@@ -473,17 +649,16 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.status = 'waiting';
       a.stuckTicks = (a.stuckTicks || 0) + 1;
 
-      // STUCK REROUTE: If stuck behind another agent for 3+ ticks, reroute
-      if (a.stuckTicks >= 3 && a.targetX !== null && a.targetY !== null) {
-        // Mark the blocking cell as temporary obstacle for pathfinding
+      // Wide reroute only after sustained blockage
+      if (a.stuckTicks > BLOCKED_REROUTE_THRESHOLD && a.targetX !== null && a.targetY !== null) {
         const blockingCell = { x: move.nextX, y: move.nextY };
-        const tempBlocks = [...newState.manualBlocks, blockingCell];
-        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, tempBlocks);
-        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, tempBlocks);
+        const dynamicCosts = buildBufferCosts(updatedAgents, a.id, blockingCell);
+        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.stuckTicks = 0;
         a.status = 'moving';
         a.confidence = 'recalculating';
-        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Reroute]: Stuck for 3 ticks — marking (${blockingCell.x},${blockingCell.y}) as obstacle, recalculating A* path`, type: 'warning' });
+        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Wide Reroute]: Blocked >5 ticks — boosting cost at (${blockingCell.x},${blockingCell.y}) to escape jam`, type: 'warning' });
       }
       return a;
     }
@@ -499,6 +674,10 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       // Consume path step
       if (a.path.length > 0 && a.path[0].x === move.nextX && a.path[0].y === move.nextY) {
         a.path = a.path.slice(1);
+      } else if (a.targetX !== null && a.targetY !== null) {
+        const dynamicCosts = buildBufferCosts(updatedAgents, a.id);
+        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
       }
 
       // Update traffic heatmap
