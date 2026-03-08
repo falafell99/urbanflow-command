@@ -1,73 +1,71 @@
-# Welcome to your Lovable project
+Markdown
+# 🚄 UrbanFlow AI: Multi-Agent Reinforcement Learning Simulator
 
-## Project info
+> **Autonomous logistics optimization engine for dense urban environments using MARL and PPO.**
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+---
 
-## How can I edit this code?
+### 🚀 Quick Links
+| 🌐 Live Simulation | 📂 Source Code | 🛠 AI Framework |
+| :--- | :--- | :--- |
+| [**Deploy on Vercel**](https://YOUR-VERCEL-LINK-HERE.vercel.app/) | [**Repository**](https://github.com/rafael-ibayev/rafael-ibayev-portfolio) | ![PPO-Stable](https://img.shields.io/badge/Algorithm-PPO--CTDE-3b82f6) |
 
-There are several ways of editing your application.
+---
 
-**Use Lovable**
+## 📌 Overview
+**UrbanFlow AI** is a high-fidelity simulation platform designed to solve the "Last Mile" delivery problem. By utilizing **Multi-Agent Reinforcement Learning (MARL)**, the system coordinates multiple autonomous units in a shared grid, optimizing for throughput while maintaining zero-collision safety margins.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+This project demonstrates the bridge between **Deep Learning research** and **Real-time Systems engineering**.
 
-Changes made via Lovable will be committed automatically to this repo.
+---
 
-**Use your preferred IDE**
+## 🧠 Core AI Architecture
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### 1️⃣ Training Framework: CTDE
+The system implements **Centralized Training, Decentralized Execution (CTDE)**. 
+* **During Training:** The model sees the global state to learn optimal cooperation.
+* **During Execution:** Each agent makes independent decisions based on local observations, ensuring the system scales to hundreds of units.
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### 2️⃣ Decision Making: PPO
+Agents use **Proximal Policy Optimization (PPO)** to ensure stable learning. The policy network maps local grid observations (20x20) to discrete actions: `[Move N, S, E, W, Wait]`.
 
-Follow these steps:
+### 3️⃣ The Reward Function
+The "intelligence" of the system is governed by a multi-objective reward function $R$:
+$$R = \sum (D_{success} \times 10) - (C_{collision} \times 50) - (L_{latency} \times 0.1)$$
+* **$D_{success}$:** High incentive for completed deliveries.
+* **$C_{collision}$:** Heavy penalty for any agent-to-agent conflict.
+* **$L_{latency}$:** Subtle pressure to find the shortest possible path.
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+---
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+## 🛠 Advanced Features
 
-# Step 3: Install the necessary dependencies.
-npm i
+### 🚦 Intelligent Scenario Management
+* **Peak Congestion Stress-Test:** Doubling agent density to observe emergent cooperative behavior (e.g., yielding at intersections).
+* **Emergency Rerouting:** Real-time intersection blocking to test the agents' ability to dynamically recalculate paths.
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
-```
+### 📊 Deep Telemetry & Analytics
+* **Active Asset Inspector:** Drill down into any agent's live state (UUID, Task Queue, Battery, and Confidence Score).
+* **Network Throughput:** Real-time sparklines tracking global system efficiency and latency spikes.
+* **Neural Heatmaps:** Visualizing high-traffic "Decision Nodes" within the urban grid.
 
-**Edit a file directly in GitHub**
+---
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## 💻 Tech Stack
+* **Frontend:** React 18, TypeScript (High-performance state management).
+* **Visuals:** Framer Motion for smooth agent transitions & Tailwind CSS.
+* **Architecture:** Modular component design for scalable simulation layers.
+* **Deployment:** CI/CD via GitHub & Vercel.
 
-**Use GitHub Codespaces**
+---
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## 👨‍💻 About the Author
+**Rafael Ibayev**
+* **Education:** Computer Science Student at **ELTE University**, Budapest.
+* **Achievements:** International STEM Olympiad Gold Medalist.
+* **Interests:** AI Safety, Robotics, and High-Performance Systems.
 
-## What technologies are used for this project?
+---
 
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+## 📄 License
+This project is licensed under the **MIT License**.
