@@ -168,6 +168,7 @@ export default function Index() {
               onSelectAgent={setSelectedAgentId}
               heatmapVisible={heatmapVisible}
               onToggleHeatmap={() => setHeatmapVisible(!heatmapVisible)}
+              onToggleBlock={handleToggleBlock}
             />
           </motion.div>
 
