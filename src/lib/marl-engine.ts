@@ -520,6 +520,9 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     priority?: number;
   }[] = [];
   
+  // Track repulsion requests from agents near their targets
+  const repulsionRequests: { fromId: number; targetX: number; targetY: number }[] = [];
+
   // Build current occupation map
   const currentOccupied = new Set<string>();
   for (const agent of newState.agents) {
