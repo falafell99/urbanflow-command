@@ -363,8 +363,9 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   newState.totalCollisions += collisions;
   const totalWaitTime = newAgents.reduce((sum, a) => sum + (a.status === 'idle' ? 0.5 : 0), 0);
   tickReward -= totalWaitTime * 0.5;
-  tickReward -= collisions * 50;
-  tickReward *= (1 + params.learningRate * params.discountFactor);
+  tickReward -= collisions * params.collisionPenalty;
+  const safetyMod = params.speedVsSafety === 'safety' ? 0.7 : 1.0;
+  tickReward *= safetyMod * (1 + params.learningRate * params.discountFactor);
 
   newState.totalReward += tickReward;
   newState.rewardHistory = [...newState.rewardHistory, newState.totalReward];
