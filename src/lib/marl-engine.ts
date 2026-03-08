@@ -140,7 +140,7 @@ function isBlocked(x: number, y: number, blocked: BlockedIntersection[], manualB
   return blocked.some(b => b.x === x && b.y === y) || manualBlocks.some(b => b.x === x && b.y === y);
 }
 
-function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[] = []): { x: number; y: number }[] {
+function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[] = [], manualBlocks: { x: number; y: number }[] = []): { x: number; y: number }[] {
   const path: { x: number; y: number }[] = [];
   let cx = ax, cy = ay;
   while (cx !== tx || cy !== ty) {
