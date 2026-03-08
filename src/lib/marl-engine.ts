@@ -646,12 +646,25 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.stuckTicks = 0;
       const unclaimed = newState.deliveryPoints.filter(dp => !dp.claimed);
       if (unclaimed.length > 0) {
+        // Filter to only reachable targets
+        const reachable = unclaimed.filter(dp =>
+          !isTargetTrapped(dp.x, dp.y, newState.blockedIntersections, newState.manualBlocks)
+          && isReachable(a.x, a.y, dp.x, dp.y, newState.blockedIntersections, newState.manualBlocks)
+        );
+
+        if (reachable.length === 0) {
+          a.waitTime++;
+          a.status = 'idle';
+          desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle', priority: priorityDistance });
+          return a;
+        }
+
         let target: DeliveryPoint;
         if (Math.random() < params.explorationRate) {
-          target = unclaimed[randInt(unclaimed.length)];
+          target = reachable[randInt(reachable.length)];
           newState.logs.push({ tick: newState.tick, agentId: a.id, message: `Route exploration: random target (${target.x},${target.y})`, type: 'info' });
         } else {
-          target = unclaimed.reduce((best, dp) => distance(a.x, a.y, dp.x, dp.y) < distance(a.x, a.y, best.x, best.y) ? dp : best);
+          target = reachable.reduce((best, dp) => distance(a.x, a.y, dp.x, dp.y) < distance(a.x, a.y, best.x, best.y) ? dp : best);
         }
 
         // Target Availability Check
@@ -670,6 +683,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
 
         a.targetX = target.x;
         a.targetY = target.y;
+        a.lastPathTick = newState.tick;
         const dynamicCosts = buildBufferCosts(newState.agents, a.id);
         a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.pathCandidates = generatePathCandidates(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
@@ -687,18 +701,23 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       }
     }
 
-    // === Smart Arrival: 1 cell from target & target occupied → wait_target ===
+    // === Smart Arrival: 1-2 cells from target & blocked → repulsion + wait ===
     if (a.status === 'moving' && a.targetX !== null && a.targetY !== null) {
       const distToTarget = distance(a.x, a.y, a.targetX, a.targetY);
-      if (distToTarget <= 1) {
+      if (distToTarget <= REPULSION_RANGE) {
         const targetKey = cellKey(a.targetX, a.targetY);
         if (currentOccupied.has(targetKey)) {
-          a.status = 'waiting_target';
-          a.confidence = 'waiting_target';
-          a.velocity = 0;
-          a.path = [];
-          desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
-          return a;
+          // Send repulsion signal to nearby idle/waiting agents
+          repulsionRequests.push({ fromId: a.id, targetX: a.targetX, targetY: a.targetY });
+
+          if (distToTarget <= 1) {
+            a.status = 'waiting_target';
+            a.confidence = 'waiting_target';
+            a.velocity = 0;
+            a.path = [];
+            desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+            return a;
+          }
         }
       }
     }
