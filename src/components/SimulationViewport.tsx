@@ -20,6 +20,7 @@ const confidenceColor = {
   recalculating: 'hsl(38 92% 50%)',
   blocked: 'hsl(var(--destructive))',
   waiting_target: 'hsl(270 70% 60%)',
+  stuck: 'hsl(0 80% 50%)',
 };
 
 function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: Agent; cellSize: number; selected: boolean; dimmed: boolean; onSelect: () => void }) {
