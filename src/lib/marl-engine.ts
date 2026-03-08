@@ -684,7 +684,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       if (a.targetX !== null && a.targetY !== null) {
         const targetKey = cellKey(a.targetX, a.targetY);
         if (!currentOccupied.has(targetKey)) {
-          const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+          const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
           a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
           a.status = 'moving';
           a.confidence = 'clear';
