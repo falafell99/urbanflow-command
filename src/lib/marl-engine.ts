@@ -114,6 +114,8 @@ function createAgent(id: number): Agent {
     backoffTicks: 0,
     stuckTicks: 0,
     oscillationCycles: 0,
+    directionChanges: 0,
+    coolingTicks: 0,
   };
 }
 
