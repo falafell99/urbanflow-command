@@ -152,64 +152,179 @@ export function createInitialState(scenario: Scenario = 'standard'): SimState {
   };
 }
 
+const WIDE_REROUTE_PENALTY = 40;
+const BUFFER_ZONE_COST = 6;
+const BLOCKED_REROUTE_THRESHOLD = 5;
+const OSCILLATION_CYCLE_THRESHOLD = 3;
+const MAX_ASTAR_ITERATIONS = 800;
+
+function cellKey(x: number, y: number) {
+  return `${x},${y}`;
+}
+
 function isBlocked(x: number, y: number, blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[] = []): boolean {
   return blocked.some(b => b.x === x && b.y === y) || manualBlocks.some(b => b.x === x && b.y === y);
 }
 
-function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[] = [], manualBlocks: { x: number; y: number }[] = []): { x: number; y: number }[] {
-  const path: { x: number; y: number }[] = [];
-  let cx = ax, cy = ay;
-  while (cx !== tx || cy !== ty) {
-    let nx = cx, ny = cy;
-    if (cx < tx) nx = cx + 1;
-    else if (cx > tx) nx = cx - 1;
-    else if (cy < ty) ny = cy + 1;
-    else if (cy > ty) ny = cy - 1;
+function buildBufferCosts(
+  agents: Agent[],
+  selfId: number,
+  boostedCell?: { x: number; y: number }
+): Map<string, number> {
+  const costs = new Map<string, number>();
 
-    if (isBlocked(nx, ny, blocked, manualBlocks)) {
-      if (nx !== cx) {
-        if (cy < ty) ny = cy + 1;
-        else if (cy > ty) ny = cy - 1;
-        else ny = cy + (Math.random() > 0.5 ? 1 : -1);
-        nx = cx;
-        ny = Math.max(0, Math.min(19, ny));
-      } else {
-        if (cx < tx) nx = cx + 1;
-        else if (cx > tx) nx = cx - 1;
-        else nx = cx + (Math.random() > 0.5 ? 1 : -1);
-        ny = cy;
-        nx = Math.max(0, Math.min(19, nx));
+  for (const other of agents) {
+    if (other.id === selfId) continue;
+    const key = cellKey(other.x, other.y);
+    costs.set(key, Math.max(costs.get(key) ?? 0, BUFFER_ZONE_COST));
+  }
+
+  if (boostedCell) {
+    const key = cellKey(boostedCell.x, boostedCell.y);
+    costs.set(key, Math.max(costs.get(key) ?? 0, WIDE_REROUTE_PENALTY));
+  }
+
+  return costs;
+}
+
+function reconstructPath(cameFrom: Map<string, string>, targetKey: string): { x: number; y: number }[] {
+  const path: { x: number; y: number }[] = [];
+  let current: string | undefined = targetKey;
+
+  while (current) {
+    const [x, y] = current.split(',').map(Number);
+    path.push({ x, y });
+    current = cameFrom.get(current);
+  }
+
+  path.reverse();
+  return path.slice(1);
+}
+
+function simplePath(
+  ax: number,
+  ay: number,
+  tx: number,
+  ty: number,
+  blocked: BlockedIntersection[] = [],
+  manualBlocks: { x: number; y: number }[] = [],
+  dynamicCosts: Map<string, number> = new Map()
+): { x: number; y: number }[] {
+  if (ax === tx && ay === ty) return [];
+  if (isBlocked(tx, ty, blocked, manualBlocks)) return [];
+
+  const open = new Set<string>([cellKey(ax, ay)]);
+  const cameFrom = new Map<string, string>();
+  const gScore = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(Number.POSITIVE_INFINITY));
+  const fScore = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(Number.POSITIVE_INFINITY));
+
+  gScore[ay][ax] = 0;
+  fScore[ay][ax] = distance(ax, ay, tx, ty);
+
+  let iterations = 0;
+  while (open.size > 0 && iterations < MAX_ASTAR_ITERATIONS) {
+    iterations++;
+
+    let currentKey: string | null = null;
+    let bestF = Number.POSITIVE_INFINITY;
+
+    open.forEach((key) => {
+      const [x, y] = key.split(',').map(Number);
+      if (fScore[y][x] < bestF) {
+        bestF = fScore[y][x];
+        currentKey = key;
       }
-      if (isBlocked(nx, ny, blocked, manualBlocks)) {
-        break;
+    });
+
+    if (!currentKey) break;
+    const [cx, cy] = currentKey.split(',').map(Number);
+
+    if (cx === tx && cy === ty) {
+      return reconstructPath(cameFrom, currentKey);
+    }
+
+    open.delete(currentKey);
+
+    const neighbors = [
+      { x: cx + 1, y: cy },
+      { x: cx - 1, y: cy },
+      { x: cx, y: cy + 1 },
+      { x: cx, y: cy - 1 },
+    ];
+
+    for (const n of neighbors) {
+      if (n.x < 0 || n.x >= GRID_SIZE || n.y < 0 || n.y >= GRID_SIZE) continue;
+      if (isBlocked(n.x, n.y, blocked, manualBlocks)) continue;
+
+      const nKey = cellKey(n.x, n.y);
+      const stepCost = 1 + (dynamicCosts.get(nKey) ?? 0);
+      const tentative = gScore[cy][cx] + stepCost;
+
+      if (tentative < gScore[n.y][n.x]) {
+        cameFrom.set(nKey, currentKey);
+        gScore[n.y][n.x] = tentative;
+        fScore[n.y][n.x] = tentative + distance(n.x, n.y, tx, ty);
+        open.add(nKey);
       }
     }
-    cx = nx;
-    cy = ny;
-    path.push({ x: cx, y: cy });
-    if (path.length > 50) break;
   }
-  return path;
+
+  return [];
 }
 
 // Generate alternative path candidates for neural planning visualization
-function generatePathCandidates(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[]): { x: number; y: number }[][] {
+function generatePathCandidates(
+  ax: number,
+  ay: number,
+  tx: number,
+  ty: number,
+  blocked: BlockedIntersection[],
+  manualBlocks: { x: number; y: number }[],
+  dynamicCosts: Map<string, number>
+): { x: number; y: number }[][] {
   const candidates: { x: number; y: number }[][] = [];
-  // Primary path
-  candidates.push(simplePath(ax, ay, tx, ty, blocked, manualBlocks));
-  // Alternative: go horizontal first
-  const midX = tx, midY = ay;
-  if (!isBlocked(midX, midY, blocked, manualBlocks)) {
-    const alt1 = [...simplePath(ax, ay, midX, midY, blocked, manualBlocks), ...simplePath(midX, midY, tx, ty, blocked, manualBlocks)];
-    if (alt1.length > 0) candidates.push(alt1.slice(0, 30));
-  }
-  // Alternative: go vertical first
-  const midX2 = ax, midY2 = ty;
-  if (!isBlocked(midX2, midY2, blocked, manualBlocks)) {
-    const alt2 = [...simplePath(ax, ay, midX2, midY2, blocked, manualBlocks), ...simplePath(midX2, midY2, tx, ty, blocked, manualBlocks)];
-    if (alt2.length > 0) candidates.push(alt2.slice(0, 30));
-  }
+
+  const primary = simplePath(ax, ay, tx, ty, blocked, manualBlocks, dynamicCosts);
+  if (primary.length > 0) candidates.push(primary);
+
+  const horizontalFirst = simplePath(ax, ay, tx, ay, blocked, manualBlocks, dynamicCosts);
+  const horizontalTail = simplePath(tx, ay, tx, ty, blocked, manualBlocks, dynamicCosts);
+  const alt1 = [...horizontalFirst, ...horizontalTail];
+  if (alt1.length > 0) candidates.push(alt1.slice(0, 40));
+
+  const verticalFirst = simplePath(ax, ay, ax, ty, blocked, manualBlocks, dynamicCosts);
+  const verticalTail = simplePath(ax, ty, tx, ty, blocked, manualBlocks, dynamicCosts);
+  const alt2 = [...verticalFirst, ...verticalTail];
+  if (alt2.length > 0) candidates.push(alt2.slice(0, 40));
+
   return candidates;
+}
+
+function findClearanceCell(
+  agent: Agent,
+  blocked: BlockedIntersection[],
+  manualBlocks: { x: number; y: number }[],
+  occupiedNow: Set<string>,
+  reservedTargets: Set<string>
+): { x: number; y: number } | null {
+  const neighbors = [
+    { x: agent.x + 1, y: agent.y },
+    { x: agent.x - 1, y: agent.y },
+    { x: agent.x, y: agent.y + 1 },
+    { x: agent.x, y: agent.y - 1 },
+  ]
+    .filter((n) => n.x >= 0 && n.x < GRID_SIZE && n.y >= 0 && n.y < GRID_SIZE)
+    .sort(() => Math.random() - 0.5);
+
+  for (const n of neighbors) {
+    if (isBlocked(n.x, n.y, blocked, manualBlocks)) continue;
+    const key = cellKey(n.x, n.y);
+    if (occupiedNow.has(key)) continue;
+    if (reservedTargets.has(key)) continue;
+    return n;
+  }
+
+  return null;
 }
 
 // Detect oscillation: agent bouncing between same positions
