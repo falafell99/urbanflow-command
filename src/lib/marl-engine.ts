@@ -13,16 +13,18 @@ export interface Agent {
   deliveries: number;
   collisions: number;
   waitTime: number;
-  status: 'idle' | 'moving' | 'delivering' | 'waiting' | 'waiting_target';
+  status: 'idle' | 'moving' | 'delivering' | 'waiting' | 'waiting_target' | 'stuck';
   velocity: number;
   energy: number;
-  confidence: 'clear' | 'recalculating' | 'blocked' | 'waiting_target';
+  confidence: 'clear' | 'recalculating' | 'blocked' | 'waiting_target' | 'stuck';
   prevPositions: { x: number; y: number }[];
   backoffTicks: number;
   stuckTicks: number;
   oscillationCycles: number;
   directionChanges: number;
   coolingTicks: number;
+  lastPathTick: number;
+  freezeTicks: number;
 }
 
 export interface DeliveryPoint {
@@ -116,6 +118,8 @@ function createAgent(id: number): Agent {
     oscillationCycles: 0,
     directionChanges: 0,
     coolingTicks: 0,
+    lastPathTick: 0,
+    freezeTicks: 0,
   };
 }
 
@@ -163,9 +167,11 @@ const BUFFER_ZONE_COST = 6;
 const BLOCKED_REROUTE_THRESHOLD = 5;
 const OSCILLATION_CYCLE_THRESHOLD = 3;
 const MAX_ASTAR_ITERATIONS = 800;
-const DIRECTION_CHANGE_LIMIT = 3;
+const DIRECTION_CHANGE_LIMIT = 4;
 const DIRECTION_WINDOW = 5;
-const COOLING_PERIOD = 10;
+const FREEZE_PERIOD = 15;
+const PATH_DEBOUNCE_TICKS = 5;
+const REPULSION_RANGE = 2;
 
 function cellKey(x: number, y: number) {
   return `${x},${y}`;
@@ -344,6 +350,55 @@ function detectOscillation(positions: { x: number; y: number }[]): boolean {
   return uniquePositions.size <= 2;
 }
 
+// BFS reachability check: can we reach (tx,ty) from (sx,sy)?
+function isReachable(
+  sx: number, sy: number, tx: number, ty: number,
+  blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[]
+): boolean {
+  if (sx === tx && sy === ty) return true;
+  if (isBlocked(tx, ty, blocked, manualBlocks)) return false;
+
+  const visited = new Set<string>();
+  const queue: { x: number; y: number }[] = [{ x: tx, y: ty }];
+  visited.add(cellKey(tx, ty));
+
+  // Quick flood fill from target to check if agent position is reachable
+  while (queue.length > 0) {
+    const cur = queue.shift()!;
+    if (cur.x === sx && cur.y === sy) return true;
+
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = cur.x + dx;
+      const ny = cur.y + dy;
+      if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+      const nk = cellKey(nx, ny);
+      if (visited.has(nk)) continue;
+      if (isBlocked(nx, ny, blocked, manualBlocks)) continue;
+      visited.add(nk);
+      queue.push({ x: nx, y: ny });
+    }
+  }
+  return false;
+}
+
+// Check if a target cell is surrounded (unreachable from all 4 sides)
+function isTargetTrapped(
+  tx: number, ty: number,
+  blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[]
+): boolean {
+  if (isBlocked(tx, ty, blocked, manualBlocks)) return true;
+  // Check if all 4 neighbors are blocked or out of bounds
+  let accessibleNeighbors = 0;
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nx = tx + dx;
+    const ny = ty + dy;
+    if (nx >= 0 && nx < GRID_SIZE && ny >= 0 && ny < GRID_SIZE && !isBlocked(nx, ny, blocked, manualBlocks)) {
+      accessibleNeighbors++;
+    }
+  }
+  return accessibleNeighbors === 0;
+}
+
 // AI-driven log messages
 const cooperativeMessages = [
   "Switched to 'Cooperative Mode' to resolve deadlock",
@@ -371,19 +426,36 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   let tickDeliveries = 0;
   let tickCollisions = 0;
 
-  // Spawn deliveries
+  // Spawn deliveries with reachability validation
   const spawnRate = state.scenario === 'peak' ? 0.3 : 0.15;
   if (newState.deliveryPoints.length < MAX_DELIVERIES && Math.random() < spawnRate) {
-    const dp: DeliveryPoint = {
-      id: newState.tick * 100 + randInt(100),
-      x: randInt(GRID_SIZE),
-      y: randInt(GRID_SIZE),
-      spawnTime: newState.tick,
-      timeout: DELIVERY_TIMEOUT,
-      claimed: false,
-      claimedBy: null,
-    };
-    newState.deliveryPoints = [...newState.deliveryPoints, dp];
+    let attempts = 0;
+    let validTarget = false;
+    let tx = 0, ty = 0;
+    while (attempts < 10 && !validTarget) {
+      tx = randInt(GRID_SIZE);
+      ty = randInt(GRID_SIZE);
+      if (!isTargetTrapped(tx, ty, newState.blockedIntersections, newState.manualBlocks)) {
+        // Quick reachability: check that at least one agent can reach it
+        const anyReachable = newState.agents.some(ag =>
+          isReachable(ag.x, ag.y, tx, ty, newState.blockedIntersections, newState.manualBlocks)
+        );
+        if (anyReachable) validTarget = true;
+      }
+      attempts++;
+    }
+    if (validTarget) {
+      const dp: DeliveryPoint = {
+        id: newState.tick * 100 + randInt(100),
+        x: tx,
+        y: ty,
+        spawnTime: newState.tick,
+        timeout: DELIVERY_TIMEOUT,
+        claimed: false,
+        claimedBy: null,
+      };
+      newState.deliveryPoints = [...newState.deliveryPoints, dp];
+    }
   }
 
   // Emergency: periodically re-block intersections
@@ -448,6 +520,9 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     priority?: number;
   }[] = [];
   
+  // Track repulsion requests from agents near their targets
+  const repulsionRequests: { fromId: number; targetX: number; targetY: number }[] = [];
+
   // Build current occupation map
   const currentOccupied = new Set<string>();
   for (const agent of newState.agents) {
@@ -463,6 +538,26 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     const priorityDistance = a.targetX !== null && a.targetY !== null
       ? distance(a.x, a.y, a.targetX, a.targetY)
       : Number.POSITIVE_INFINITY;
+
+    // === FREEZE: Anti-oscillation lock (stuck status) ===
+    if (a.freezeTicks > 0) {
+      a.freezeTicks--;
+      a.status = 'stuck';
+      a.velocity = 0;
+      a.confidence = 'stuck';
+      // When freeze ends, recalculate path from scratch
+      if (a.freezeTicks === 0 && a.targetX !== null && a.targetY !== null) {
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        a.lastPathTick = newState.tick;
+        a.status = 'moving';
+        a.confidence = 'recalculating';
+        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Unfreeze]: Global route recalculated — resuming movement`, type: 'info' });
+      }
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+      return a;
+    }
 
     // === Movement Cooling: too many direction changes without progress ===
     if (a.coolingTicks > 0) {
@@ -487,15 +582,24 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       }
     }
     if (newState.tick % DIRECTION_WINDOW === 0) {
-      if (a.directionChanges > DIRECTION_CHANGE_LIMIT) {
-        a.coolingTicks = COOLING_PERIOD;
-        a.directionChanges = 0;
-        a.status = 'waiting';
-        a.velocity = 0;
-        a.confidence = 'recalculating';
-        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Cooling]: Excessive direction changes — stationary for ${COOLING_PERIOD} ticks`, type: 'warning' });
-        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
-        return a;
+      if (a.directionChanges >= DIRECTION_CHANGE_LIMIT) {
+        // Check if agent actually progressed closer to target
+        const madeProgress = a.targetX !== null && a.targetY !== null && a.prevPositions.length >= DIRECTION_WINDOW
+          && distance(a.x, a.y, a.targetX, a.targetY) < distance(
+            a.prevPositions[a.prevPositions.length - DIRECTION_WINDOW]?.x ?? a.x,
+            a.prevPositions[a.prevPositions.length - DIRECTION_WINDOW]?.y ?? a.y,
+            a.targetX, a.targetY);
+
+        if (!madeProgress) {
+          a.freezeTicks = FREEZE_PERIOD;
+          a.directionChanges = 0;
+          a.status = 'stuck';
+          a.velocity = 0;
+          a.confidence = 'stuck';
+          newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[STUCK] Recalculating global route... frozen for ${FREEZE_PERIOD} ticks`, type: 'error' });
+          desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+          return a;
+        }
       }
       a.directionChanges = 0;
     }
@@ -510,7 +614,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       return a;
     }
 
-    // Deadlock resolver: oscillation cycles -> forced random sidestep
+    // Deadlock resolver: oscillation cycles -> forced freeze
     if (a.status === 'moving' && detectOscillation(a.prevPositions)) {
       a.oscillationCycles = (a.oscillationCycles || 0) + 1;
     } else {
@@ -518,24 +622,13 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     }
 
     if (a.oscillationCycles > OSCILLATION_CYCLE_THRESHOLD) {
-      const sideSteps = [
-        { x: a.x + 1, y: a.y },
-        { x: a.x - 1, y: a.y },
-        { x: a.x, y: a.y + 1 },
-        { x: a.x, y: a.y - 1 },
-      ].filter(d => d.x >= 0 && d.x < GRID_SIZE && d.y >= 0 && d.y < GRID_SIZE
-        && !isBlocked(d.x, d.y, newState.blockedIntersections, newState.manualBlocks));
-
-      if (sideSteps.length > 0) {
-        const pick = sideSteps[randInt(sideSteps.length)];
-        desiredMoves.push({ agent: a, nextX: pick.x, nextY: pick.y, action: 'move', priority: priorityDistance });
-        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Side-step]: Oscillation persisted — forcing random symmetry break`, type: 'warning' });
-      } else {
-        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
-      }
+      a.freezeTicks = FREEZE_PERIOD;
       a.oscillationCycles = 0;
-      a.confidence = 'recalculating';
+      a.status = 'stuck';
+      a.confidence = 'stuck';
       a.velocity = 0;
+      newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[STUCK] Oscillation detected — freezing for ${FREEZE_PERIOD} ticks and recalculating`, type: 'error' });
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
       return a;
     }
 
@@ -566,12 +659,25 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.stuckTicks = 0;
       const unclaimed = newState.deliveryPoints.filter(dp => !dp.claimed);
       if (unclaimed.length > 0) {
+        // Filter to only reachable targets
+        const reachable = unclaimed.filter(dp =>
+          !isTargetTrapped(dp.x, dp.y, newState.blockedIntersections, newState.manualBlocks)
+          && isReachable(a.x, a.y, dp.x, dp.y, newState.blockedIntersections, newState.manualBlocks)
+        );
+
+        if (reachable.length === 0) {
+          a.waitTime++;
+          a.status = 'idle';
+          desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle', priority: priorityDistance });
+          return a;
+        }
+
         let target: DeliveryPoint;
         if (Math.random() < params.explorationRate) {
-          target = unclaimed[randInt(unclaimed.length)];
+          target = reachable[randInt(reachable.length)];
           newState.logs.push({ tick: newState.tick, agentId: a.id, message: `Route exploration: random target (${target.x},${target.y})`, type: 'info' });
         } else {
-          target = unclaimed.reduce((best, dp) => distance(a.x, a.y, dp.x, dp.y) < distance(a.x, a.y, best.x, best.y) ? dp : best);
+          target = reachable.reduce((best, dp) => distance(a.x, a.y, dp.x, dp.y) < distance(a.x, a.y, best.x, best.y) ? dp : best);
         }
 
         // Target Availability Check
@@ -590,6 +696,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
 
         a.targetX = target.x;
         a.targetY = target.y;
+        a.lastPathTick = newState.tick;
         const dynamicCosts = buildBufferCosts(newState.agents, a.id);
         a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.pathCandidates = generatePathCandidates(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
@@ -607,18 +714,23 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       }
     }
 
-    // === Smart Arrival: 1 cell from target & target occupied → wait_target ===
+    // === Smart Arrival: 1-2 cells from target & blocked → repulsion + wait ===
     if (a.status === 'moving' && a.targetX !== null && a.targetY !== null) {
       const distToTarget = distance(a.x, a.y, a.targetX, a.targetY);
-      if (distToTarget <= 1) {
+      if (distToTarget <= REPULSION_RANGE) {
         const targetKey = cellKey(a.targetX, a.targetY);
         if (currentOccupied.has(targetKey)) {
-          a.status = 'waiting_target';
-          a.confidence = 'waiting_target';
-          a.velocity = 0;
-          a.path = [];
-          desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
-          return a;
+          // Send repulsion signal to nearby idle/waiting agents
+          repulsionRequests.push({ fromId: a.id, targetX: a.targetX, targetY: a.targetY });
+
+          if (distToTarget <= 1) {
+            a.status = 'waiting_target';
+            a.confidence = 'waiting_target';
+            a.velocity = 0;
+            a.path = [];
+            desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+            return a;
+          }
         }
       }
     }
@@ -633,6 +745,36 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
 
     return a;
   });
+
+  // === NEIGHBOR REPULSION: Process repulsion requests ===
+  for (const req of repulsionRequests) {
+    for (let i = 0; i < updatedAgents.length; i++) {
+      const neighbor = updatedAgents[i];
+      if (neighbor.id === req.fromId) continue;
+      if (neighbor.status !== 'idle' && neighbor.status !== 'waiting') continue;
+      const distToRepulsor = distance(neighbor.x, neighbor.y, req.targetX, req.targetY);
+      if (distToRepulsor > REPULSION_RANGE) continue;
+
+      // Find nearest empty cell away from the target
+      const clearance = findClearanceCell(
+        neighbor,
+        newState.blockedIntersections,
+        newState.manualBlocks,
+        currentOccupied,
+        new Set<string>()
+      );
+      if (clearance) {
+        desiredMoves[i] = {
+          agent: neighbor,
+          nextX: clearance.x,
+          nextY: clearance.y,
+          action: 'move',
+          priority: Number.POSITIVE_INFINITY,
+        };
+        newState.logs.push({ tick: newState.tick, agentId: neighbor.id, message: `[Yield]: Repulsion signal received — clearing path for Agent ${String(req.fromId).padStart(3, '0')}`, type: 'info' });
+      }
+    }
+  }
 
   // === CELL RESERVATION SYSTEM ===
   const reservations = new Map<string, number[]>();
@@ -766,13 +908,17 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.confidence = 'clear';
       a.stuckTicks = 0;
 
-      // Consume path step
+      // Consume path step (with debounced recalculation)
       if (a.path.length > 0 && a.path[0].x === move.nextX && a.path[0].y === move.nextY) {
         a.path = a.path.slice(1);
       } else if (a.targetX !== null && a.targetY !== null) {
-        const dynamicCosts = buildBufferCosts(updatedAgents, a.id);
-        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
-        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        // Path debounce: only recalculate every PATH_DEBOUNCE_TICKS
+        if (newState.tick - (a.lastPathTick || 0) >= PATH_DEBOUNCE_TICKS) {
+          a.lastPathTick = newState.tick;
+          const dynamicCosts = buildBufferCosts(updatedAgents, a.id);
+          a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+          a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        }
       }
 
       // Update traffic heatmap

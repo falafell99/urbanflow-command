@@ -20,6 +20,7 @@ const confidenceColor = {
   recalculating: 'hsl(38 92% 50%)',
   blocked: 'hsl(var(--destructive))',
   waiting_target: 'hsl(270 70% 60%)',
+  stuck: 'hsl(0 80% 50%)',
 };
 
 function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: Agent; cellSize: number; selected: boolean; dimmed: boolean; onSelect: () => void }) {
@@ -31,7 +32,9 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
         ? 'hsl(38 92% 50%)'
         : agent.status === 'waiting_target'
           ? 'hsl(270 70% 60%)'
-          : 'hsl(var(--muted-foreground))';
+          : agent.status === 'stuck'
+            ? 'hsl(0 80% 50%)'
+            : 'hsl(var(--muted-foreground))';
 
   const ringColor = confidenceColor[agent.confidence];
 
@@ -89,6 +92,9 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
         )}
         {agent.backoffTicks > 0 && (
           <div className="text-warning">Backoff: {agent.backoffTicks} ticks</div>
+        )}
+        {agent.freezeTicks > 0 && (
+          <div className="text-destructive">[STUCK] Frozen: {agent.freezeTicks} ticks remaining</div>
         )}
       </TooltipContent>
     </Tooltip>
