@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Play, Pause, RotateCcw, Settings } from 'lucide-react';
+import { Play, Pause, RotateCcw, Code2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import SimulationViewport from '@/components/SimulationViewport';
 import RewardChart from '@/components/RewardChart';
@@ -10,11 +10,13 @@ import HyperparamPanel from '@/components/HyperparamPanel';
 import TechArchitecture from '@/components/TechArchitecture';
 import StatsBar from '@/components/StatsBar';
 import AssetTable from '@/components/AssetTable';
+import ActiveInspector from '@/components/ActiveInspector';
 import { createInitialState, stepSimulation, type Hyperparams, type SimState } from '@/lib/marl-engine';
 
 export default function Index() {
   const [state, setState] = useState<SimState>(createInitialState);
   const [running, setRunning] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [params, setParams] = useState<Hyperparams>({
     learningRate: 0.003,
     discountFactor: 0.99,
@@ -35,8 +37,13 @@ export default function Index() {
 
   const reset = () => {
     setRunning(false);
+    setSelectedAgentId(null);
     setState(createInitialState());
   };
+
+  const selectedAgent = selectedAgentId !== null
+    ? state.agents.find(a => a.id === selectedAgentId) ?? null
+    : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -52,6 +59,15 @@ export default function Index() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-muted-foreground hover:text-foreground h-8 text-xs gap-1.5"
+            onClick={() => {}}
+          >
+            <Code2 className="w-3.5 h-3.5" />
+            Source Code
+          </Button>
           <Button
             size="sm"
             variant="ghost"
@@ -76,7 +92,7 @@ export default function Index() {
 
       <div className="p-6 space-y-4">
         {/* Stats Bar */}
-        <StatsBar state={state} />
+        <StatsBar state={state} running={running} />
 
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -87,11 +103,23 @@ export default function Index() {
             transition={{ delay: 0.1 }}
             className="lg:col-span-7"
           >
-            <SimulationViewport state={state} />
+            <SimulationViewport
+              state={state}
+              selectedAgentId={selectedAgentId}
+              onSelectAgent={setSelectedAgentId}
+            />
           </motion.div>
 
           {/* Right Panel */}
-          <div className="lg:col-span-5 grid grid-rows-[1fr_1fr] gap-4" style={{ minHeight: 0 }}>
+          <div className="lg:col-span-5 grid grid-rows-[auto_1fr_1fr] gap-4" style={{ minHeight: 0 }}>
+            {/* Active Inspector */}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }}>
+              <ActiveInspector
+                agent={selectedAgent}
+                tick={state.tick}
+                onClose={() => setSelectedAgentId(null)}
+              />
+            </motion.div>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
               <RewardChart state={state} />
             </motion.div>

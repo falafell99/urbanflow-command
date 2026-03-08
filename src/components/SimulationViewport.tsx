@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { SimState, Agent } from '@/lib/marl-engine';
@@ -7,9 +7,11 @@ const GRID_SIZE = 20;
 
 interface Props {
   state: SimState;
+  selectedAgentId: number | null;
+  onSelectAgent: (id: number | null) => void;
 }
 
-function AssetMarker({ agent, cellSize }: { agent: Agent; cellSize: number }) {
+function AssetMarker({ agent, cellSize, selected, onSelect }: { agent: Agent; cellSize: number; selected: boolean; onSelect: () => void }) {
   const statusColor = agent.status === 'moving'
     ? 'hsl(var(--primary))'
     : agent.status === 'delivering'
@@ -21,6 +23,7 @@ function AssetMarker({ agent, cellSize }: { agent: Agent; cellSize: number }) {
       <TooltipTrigger asChild>
         <motion.div
           className="absolute cursor-pointer"
+          onClick={(e) => { e.stopPropagation(); onSelect(); }}
           animate={{
             left: `${(agent.x + 0.5) * cellSize - 0.6}%`,
             top: `${(agent.y + 0.5) * cellSize - 0.6}%`,
@@ -28,6 +31,15 @@ function AssetMarker({ agent, cellSize }: { agent: Agent; cellSize: number }) {
           transition={{ duration: 0.15, ease: 'linear' }}
           style={{ width: '1.2%', height: '1.2%' }}
         >
+          {/* Selection ring */}
+          {selected && (
+            <motion.div
+              className="absolute -inset-[6px] rounded-full border-2 border-primary"
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              style={{ boxShadow: '0 0 8px hsl(var(--primary) / 0.3)' }}
+            />
+          )}
           <svg viewBox="0 0 24 24" className="w-full h-full" fill="none">
             <rect x="3" y="6" width="18" height="12" rx="2" fill={statusColor} opacity={0.9} />
             <circle cx="8" cy="18" r="2" fill={statusColor} />
@@ -48,10 +60,9 @@ function AssetMarker({ agent, cellSize }: { agent: Agent; cellSize: number }) {
   );
 }
 
-export default function SimulationViewport({ state }: Props) {
+export default function SimulationViewport({ state, selectedAgentId, onSelectAgent }: Props) {
   const cellSize = useMemo(() => 100 / GRID_SIZE, []);
 
-  // Road layout: every 4th row/col is a "road"
   const roads = useMemo(() => {
     const h: number[] = [];
     const v: number[] = [];
@@ -62,7 +73,7 @@ export default function SimulationViewport({ state }: Props) {
   }, []);
 
   return (
-    <div className="panel relative w-full aspect-square overflow-hidden">
+    <div className="panel relative w-full aspect-square overflow-hidden" onClick={() => onSelectAgent(null)}>
       {/* Header */}
       <div className="absolute top-3 left-4 z-10 flex items-center gap-2">
         <div className="w-1.5 h-1.5 rounded-full bg-primary" />
@@ -80,62 +91,23 @@ export default function SimulationViewport({ state }: Props) {
 
       {/* Urban map background */}
       <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
-        {/* Road grid */}
         {roads.h.map(i => (
-          <rect
-            key={`hr-${i}`}
-            x="0"
-            y={`${i * cellSize}%`}
-            width="100%"
-            height={`${cellSize}%`}
-            fill="hsl(var(--border) / 0.3)"
-          />
+          <rect key={`hr-${i}`} x="0" y={`${i * cellSize}%`} width="100%" height={`${cellSize}%`} fill="hsl(var(--border) / 0.3)" />
         ))}
         {roads.v.map(i => (
-          <rect
-            key={`vr-${i}`}
-            x={`${i * cellSize}%`}
-            y="0"
-            width={`${cellSize}%`}
-            height="100%"
-            fill="hsl(var(--border) / 0.3)"
-          />
-        ))}
-        {/* Fine grid */}
-        {Array.from({ length: GRID_SIZE + 1 }, (_, i) => (
-          <line
-            key={`h-${i}`}
-            x1="0" y1={`${i * cellSize}%`}
-            x2="100%" y2={`${i * cellSize}%`}
-            stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.4"
-          />
+          <rect key={`vr-${i}`} x={`${i * cellSize}%`} y="0" width={`${cellSize}%`} height="100%" fill="hsl(var(--border) / 0.3)" />
         ))}
         {Array.from({ length: GRID_SIZE + 1 }, (_, i) => (
-          <line
-            key={`v-${i}`}
-            x1={`${i * cellSize}%`} y1="0"
-            x2={`${i * cellSize}%`} y2="100%"
-            stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.4"
-          />
+          <line key={`h-${i}`} x1="0" y1={`${i * cellSize}%`} x2="100%" y2={`${i * cellSize}%`} stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.4" />
         ))}
-        {/* Building blocks */}
+        {Array.from({ length: GRID_SIZE + 1 }, (_, i) => (
+          <line key={`v-${i}`} x1={`${i * cellSize}%`} y1="0" x2={`${i * cellSize}%`} y2="100%" stroke="hsl(var(--border))" strokeWidth="0.5" opacity="0.4" />
+        ))}
         {Array.from({ length: GRID_SIZE }, (_, r) =>
           Array.from({ length: GRID_SIZE }, (_, c) => {
-            const isRoadH = roads.h.includes(r);
-            const isRoadV = roads.v.includes(c);
-            if (!isRoadH && !isRoadV) {
+            if (!roads.h.includes(r) && !roads.v.includes(c)) {
               return (
-                <rect
-                  key={`b-${r}-${c}`}
-                  x={`${c * cellSize + 0.3}%`}
-                  y={`${r * cellSize + 0.3}%`}
-                  width={`${cellSize - 0.6}%`}
-                  height={`${cellSize - 0.6}%`}
-                  rx="1"
-                  fill="hsl(var(--muted) / 0.5)"
-                  stroke="hsl(var(--border))"
-                  strokeWidth="0.3"
-                />
+                <rect key={`b-${r}-${c}`} x={`${c * cellSize + 0.3}%`} y={`${r * cellSize + 0.3}%`} width={`${cellSize - 0.6}%`} height={`${cellSize - 0.6}%`} rx="1" fill="hsl(var(--muted) / 0.5)" stroke="hsl(var(--border))" strokeWidth="0.3" />
               );
             }
             return null;
@@ -143,11 +115,12 @@ export default function SimulationViewport({ state }: Props) {
         )}
       </svg>
 
-      {/* Optimized trajectories */}
+      {/* Trajectories */}
       {state.agents
         .filter(a => a.path.length > 0)
         .slice(0, 15)
         .map(agent => {
+          const isSelected = agent.id === selectedAgentId;
           const allPts = [{ x: agent.x, y: agent.y }, ...agent.path];
           return allPts.slice(0, -1).map((pt, i) => {
             const next = allPts[i + 1];
@@ -158,7 +131,7 @@ export default function SimulationViewport({ state }: Props) {
             return (
               <div
                 key={`path-${agent.id}-${i}`}
-                className="absolute bg-primary/20"
+                className={isSelected ? 'absolute bg-primary/40' : 'absolute bg-primary/20'}
                 style={{
                   left: `${Math.min(x1, x2)}%`,
                   top: `${Math.min(y1, y2)}%`,
@@ -190,7 +163,13 @@ export default function SimulationViewport({ state }: Props) {
 
       {/* Asset Markers */}
       {state.agents.map(agent => (
-        <AssetMarker key={agent.id} agent={agent} cellSize={cellSize} />
+        <AssetMarker
+          key={agent.id}
+          agent={agent}
+          cellSize={cellSize}
+          selected={agent.id === selectedAgentId}
+          onSelect={() => onSelectAgent(agent.id === selectedAgentId ? null : agent.id)}
+        />
       ))}
     </div>
   );
