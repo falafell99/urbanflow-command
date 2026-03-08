@@ -20,6 +20,7 @@ export interface Agent {
   prevPositions: { x: number; y: number }[];
   backoffTicks: number;
   stuckTicks: number;
+  oscillationCycles: number;
 }
 
 export interface DeliveryPoint {
