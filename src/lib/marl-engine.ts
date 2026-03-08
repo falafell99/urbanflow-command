@@ -594,7 +594,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.confidence = 'stuck';
       // When freeze ends, recalculate path from scratch
       if (a.freezeTicks === 0 && a.targetX !== null && a.targetY !== null) {
-        const dynamicCosts = buildBufferCosts(newState.agents, a.id);
+        const dynamicCosts = buildBufferCosts(newState.agents, a.id, newState.blockedIntersections, newState.manualBlocks);
         a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.lastPathTick = newState.tick;
