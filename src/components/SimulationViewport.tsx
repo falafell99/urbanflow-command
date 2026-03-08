@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import type { SimState, Agent } from '@/lib/marl-engine';
 
 const GRID_SIZE = 20;
@@ -9,6 +11,8 @@ interface Props {
   state: SimState;
   selectedAgentId: number | null;
   onSelectAgent: (id: number | null) => void;
+  heatmapVisible: boolean;
+  onToggleHeatmap: () => void;
 }
 
 function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: Agent; cellSize: number; selected: boolean; dimmed: boolean; onSelect: () => void }) {
@@ -61,7 +65,7 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
   );
 }
 
-export default function SimulationViewport({ state, selectedAgentId, onSelectAgent }: Props) {
+export default function SimulationViewport({ state, selectedAgentId, onSelectAgent, heatmapVisible, onToggleHeatmap }: Props) {
   const cellSize = useMemo(() => 100 / GRID_SIZE, []);
   const hasSelection = selectedAgentId !== null;
 
@@ -84,8 +88,12 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
         </span>
       </div>
 
-      {/* Legend */}
+      {/* Legend + Heatmap Toggle */}
       <div className="absolute top-3 right-4 z-10 flex items-center gap-4 text-[10px] font-mono text-muted-foreground">
+        <label className="flex items-center gap-1.5 cursor-pointer" onClick={e => e.stopPropagation()}>
+          <Switch checked={heatmapVisible} onCheckedChange={onToggleHeatmap} className="scale-75" />
+          <span>Heatmap</span>
+        </label>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-primary" /> In Transit</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-success" /> Delivering</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-muted-foreground" /> Idle</span>
@@ -116,6 +124,53 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
           })
         )}
       </svg>
+
+      {/* Decision Heatmap Overlay */}
+      {heatmapVisible && (
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+          {state.decisionHeatmap.map((row, y) =>
+            row.map((val, x) => {
+              if (val < 0.5) return null;
+              const intensity = Math.min(1, val / 8);
+              return (
+                <rect
+                  key={`hm-${y}-${x}`}
+                  x={`${x * cellSize}%`}
+                  y={`${y * cellSize}%`}
+                  width={`${cellSize}%`}
+                  height={`${cellSize}%`}
+                  fill={`hsl(38 92% 50% / ${intensity * 0.6})`}
+                  rx="1"
+                >
+                  {intensity > 0.5 && (
+                    <animate attributeName="opacity" values={`${intensity * 0.4};${intensity * 0.7};${intensity * 0.4}`} dur="2s" repeatCount="indefinite" />
+                  )}
+                </rect>
+              );
+            })
+          )}
+        </svg>
+      )}
+
+      {/* Blocked Intersections (Emergency) */}
+      {state.blockedIntersections.map((b, i) => (
+        <motion.div
+          key={`blocked-${i}`}
+          className="absolute pointer-events-none"
+          animate={{ opacity: [0.6, 1, 0.6] }}
+          transition={{ repeat: Infinity, duration: 1 }}
+          style={{
+            left: `${b.x * cellSize}%`,
+            top: `${b.y * cellSize}%`,
+            width: `${cellSize * 2}%`,
+            height: `${cellSize * 2}%`,
+          }}
+        >
+          <div className="w-full h-full rounded-sm border-2 border-destructive bg-destructive/20 flex items-center justify-center">
+            <span className="text-destructive text-[8px] font-mono font-bold">BLOCKED</span>
+          </div>
+        </motion.div>
+      ))}
 
       {/* Trajectories */}
       {state.agents

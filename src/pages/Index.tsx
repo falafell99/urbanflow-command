@@ -13,13 +13,19 @@ import AssetTable from '@/components/AssetTable';
 import ActiveInspector from '@/components/ActiveInspector';
 import LoadingOverlay from '@/components/LoadingOverlay';
 import ProjectFooter from '@/components/ProjectFooter';
-import { createInitialState, stepSimulation, type Hyperparams, type SimState } from '@/lib/marl-engine';
+import SystemStatusBar from '@/components/SystemStatusBar';
+import ScenarioSelector from '@/components/ScenarioSelector';
+import LossCurve from '@/components/LossCurve';
+import MethodologyPanel from '@/components/MethodologyPanel';
+import { createInitialState, stepSimulation, type Hyperparams, type SimState, type Scenario } from '@/lib/marl-engine';
 
 export default function Index() {
-  const [state, setState] = useState<SimState>(createInitialState);
+  const [scenario, setScenario] = useState<Scenario>('standard');
+  const [state, setState] = useState<SimState>(() => createInitialState(scenario));
   const [running, setRunning] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
   const [congestionMode, setCongestionMode] = useState(false);
+  const [heatmapVisible, setHeatmapVisible] = useState(false);
   const [params, setParams] = useState<Hyperparams>({
     learningRate: 0.003,
     discountFactor: 0.99,
@@ -33,7 +39,6 @@ export default function Index() {
   const step = useCallback(() => {
     setState(prev => {
       const next = stepSimulation(prev, paramsRef.current);
-      // Inject congestion spikes
       if (congestionRef.current) {
         const lastIdx = next.conflictHistory.length - 1;
         next.conflictHistory[lastIdx] = (next.conflictHistory[lastIdx] || 0) + Math.floor(Math.random() * 5 + 3);
@@ -49,11 +54,19 @@ export default function Index() {
     return () => clearInterval(id);
   }, [running, step]);
 
+  const handleScenarioChange = (s: Scenario) => {
+    setScenario(s);
+    setRunning(false);
+    setSelectedAgentId(null);
+    setCongestionMode(false);
+    setState(createInitialState(s));
+  };
+
   const reset = () => {
     setRunning(false);
     setSelectedAgentId(null);
     setCongestionMode(false);
-    setState(createInitialState());
+    setState(createInitialState(scenario));
   };
 
   const selectedAgent = selectedAgentId !== null
@@ -63,6 +76,9 @@ export default function Index() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <LoadingOverlay />
+
+      {/* System Status Bar */}
+      <SystemStatusBar state={state} running={running} />
 
       {/* Header */}
       <header className="border-b border-border px-4 sm:px-6 h-14 flex items-center justify-between flex-shrink-0">
@@ -76,6 +92,7 @@ export default function Index() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <MethodologyPanel />
           <Button
             size="sm"
             variant="outline"
@@ -124,11 +141,13 @@ export default function Index() {
               state={state}
               selectedAgentId={selectedAgentId}
               onSelectAgent={setSelectedAgentId}
+              heatmapVisible={heatmapVisible}
+              onToggleHeatmap={() => setHeatmapVisible(!heatmapVisible)}
             />
           </motion.div>
 
           {/* Right Panel */}
-          <div className="lg:col-span-5 grid grid-rows-[auto_1fr_1fr] gap-4 lg:max-h-[720px] min-h-0 overflow-hidden">
+          <div className="lg:col-span-5 grid grid-rows-[auto_1fr_1fr] gap-4 lg:h-[720px] min-h-0 overflow-hidden">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="min-h-0 max-h-[260px] overflow-auto">
               <ActiveInspector
                 agent={selectedAgent}
@@ -136,7 +155,7 @@ export default function Index() {
                 onClose={() => setSelectedAgentId(null)}
               />
             </motion.div>
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="min-h-0">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="min-h-0 overflow-hidden">
               <RewardChart state={state} />
             </motion.div>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="min-h-0 overflow-hidden">
@@ -145,10 +164,13 @@ export default function Index() {
           </div>
 
           {/* Bottom Row */}
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }} className="lg:col-span-3">
+            <ScenarioSelector scenario={scenario} onChange={handleScenarioChange} disabled={running} />
+          </motion.div>
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="lg:col-span-3">
             <EfficiencyGauge state={state} />
           </motion.div>
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="lg:col-span-3">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.45 }} className="lg:col-span-3">
             <HyperparamPanel
               params={params}
               onChange={setParams}
@@ -156,12 +178,16 @@ export default function Index() {
               onCongestionToggle={setCongestionMode}
             />
           </motion.div>
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }} className="lg:col-span-6">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="lg:col-span-3">
+            <LossCurve state={state} />
+          </motion.div>
+
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.55 }} className="lg:col-span-12">
             <AssetTable state={state} />
           </motion.div>
 
           {/* Architecture */}
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }} className="lg:col-span-12">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }} className="lg:col-span-12">
             <TechArchitecture />
           </motion.div>
         </div>
