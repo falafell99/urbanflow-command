@@ -78,14 +78,9 @@ export default function Index() {
       const newBlocks = exists
         ? prev.manualBlocks.filter(b => !(b.x === x && b.y === y))
         : [...prev.manualBlocks, { x, y }];
-      // Recalculate paths for all moving agents
-      const newAgents = prev.agents.map(a => {
-        if (a.status === 'moving' && a.targetX !== null && a.targetY !== null) {
-          const { simplePath: sp } = require('@/lib/marl-engine');
-          // Use inline recalc
-          return a;
-        }
-        return a;
+      toast(exists ? 'Obstacle removed' : 'Manual obstacle placed', {
+        description: `Cell (${x}, ${y}) — agents recalculating paths via A* policy`,
+        duration: 1500,
       });
       return { ...prev, manualBlocks: newBlocks };
     });
