@@ -936,7 +936,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       // Wide reroute only after sustained blockage
       if (a.stuckTicks > BLOCKED_REROUTE_THRESHOLD && a.targetX !== null && a.targetY !== null) {
         const blockingCell = { x: move.nextX, y: move.nextY };
-        const dynamicCosts = buildBufferCosts(updatedAgents, a.id, blockingCell);
+        const dynamicCosts = buildBufferCosts(updatedAgents, a.id, newState.blockedIntersections, newState.manualBlocks, blockingCell);
         a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         a.stuckTicks = 0;
