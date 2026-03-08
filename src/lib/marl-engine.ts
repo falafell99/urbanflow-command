@@ -315,14 +315,16 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     newState.logs.push({ tick: newState.tick, agentId: -1, message: `[Optimization]: ${msgFn(pct)}`, type: 'success' });
   }
 
-  // === PHASE 1: Build occupation map from current positions ===
-  const occupationMap = new Map<string, number>();
+  // === PHASE 1: CALCULATION — All agents decide their desired next cell ===
+  const desiredMoves: { agent: Agent; nextX: number; nextY: number; action: 'move' | 'deliver' | 'idle' | 'wait' }[] = [];
+  
+  // Build current occupation map
+  const currentOccupied = new Set<string>();
   for (const agent of newState.agents) {
-    occupationMap.set(`${agent.x},${agent.y}`, agent.id);
+    currentOccupied.add(`${agent.x},${agent.y}`);
   }
 
-  // === PHASE 2: Compute desired moves with spatial locking ===
-  const newAgents = newState.agents.map(agent => {
+  const updatedAgents = newState.agents.map(agent => {
     const a: Agent = {
       ...agent,
       prevPositions: [...agent.prevPositions, { x: agent.x, y: agent.y }].slice(-OSCILLATION_WINDOW),
@@ -334,6 +336,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.status = 'waiting';
       a.velocity = 0;
       a.confidence = 'recalculating';
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait' });
       return a;
     }
 
@@ -343,6 +346,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.status = 'waiting';
       a.velocity = 0;
       a.confidence = 'recalculating';
+      a.stuckTicks = 0;
       // Pick a random adjacent cell to break deadlock
       const dirs = [
         { x: a.x + 1, y: a.y }, { x: a.x - 1, y: a.y },
@@ -351,8 +355,9 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         && !isBlocked(d.x, d.y, newState.blockedIntersections, newState.manualBlocks));
       if (dirs.length > 0) {
         const pick = dirs[randInt(dirs.length)];
-        a.x = pick.x;
-        a.y = pick.y;
+        desiredMoves.push({ agent: a, nextX: pick.x, nextY: pick.y, action: 'move' });
+      } else {
+        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait' });
       }
       if (a.targetX !== null && a.targetY !== null) {
         a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks);
@@ -362,8 +367,10 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       return a;
     }
 
+    // Assign target if idle/waiting
     if (a.status === 'idle' || a.status === 'waiting') {
       a.velocity = 0;
+      a.stuckTicks = 0;
       const unclaimed = newState.deliveryPoints.filter(dp => !dp.claimed);
       if (unclaimed.length > 0) {
         let target: DeliveryPoint;
@@ -382,41 +389,117 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         a.confidence = 'clear';
         target.claimed = true;
         target.claimedBy = a.id;
-
         newState.decisionHeatmap[a.y][a.x] = Math.min(10, (newState.decisionHeatmap[a.y]?.[a.x] || 0) + 1);
       } else {
         a.waitTime++;
         a.status = 'idle';
+        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle' });
+        return a;
       }
     }
 
+    // Moving agents: determine desired next cell
     if (a.status === 'moving' && a.path.length > 0) {
       const next = a.path[0];
+      desiredMoves.push({ agent: a, nextX: next.x, nextY: next.y, action: 'move' });
+    } else {
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'idle' });
+    }
 
-      // === SPATIAL LOCKING: Check if target cell is occupied ===
-      const targetKey = `${next.x},${next.y}`;
-      const occupant = occupationMap.get(targetKey);
-      if (occupant !== undefined && occupant !== a.id) {
-        // Cell is occupied — lower-priority agent (higher ID) must WAIT
-        a.waitTime++;
-        a.velocity = 0;
-        a.confidence = 'blocked';
-        // Don't move, stay in current cell
-        return a;
-      }
+    return a;
+  });
 
-      // Move to next cell
-      const prevKey = `${a.x},${a.y}`;
-      if (occupationMap.get(prevKey) === a.id) {
-        occupationMap.delete(prevKey);
+  // === CELL RESERVATION SYSTEM ===
+  // All agents that want to move compete for cell reservations
+  const reservations = new Map<string, number[]>(); // cellKey -> [agentIndices]
+  
+  for (let i = 0; i < desiredMoves.length; i++) {
+    const move = desiredMoves[i];
+    if (move.action === 'move') {
+      const key = `${move.nextX},${move.nextY}`;
+      if (!reservations.has(key)) reservations.set(key, []);
+      reservations.get(key)!.push(i);
+    }
+  }
+
+  // Resolve conflicts: lowest agent ID wins the reservation
+  const blockedAgentIndices = new Set<number>();
+  reservations.forEach((indices) => {
+    if (indices.length > 1) {
+      // Sort by agent ID (lower = higher priority)
+      indices.sort((a, b) => desiredMoves[a].agent.id - desiredMoves[b].agent.id);
+      // First one wins, rest must wait
+      for (let k = 1; k < indices.length; k++) {
+        blockedAgentIndices.add(indices[k]);
+        tickCollisions++;
       }
-      a.x = next.x;
-      a.y = next.y;
-      occupationMap.set(targetKey, a.id);
-      a.path = a.path.slice(1);
+    }
+  });
+
+  // Also check: is the target cell still occupied by an agent that isn't moving away?
+  const agentPositions = new Map<string, number>(); // cellKey -> agentId of agent staying
+  for (let i = 0; i < updatedAgents.length; i++) {
+    const move = desiredMoves[i];
+    if (!move) continue;
+    // If agent is NOT moving (waiting/idle/blocked), it occupies its current cell
+    if (move.action !== 'move' || blockedAgentIndices.has(i)) {
+      agentPositions.set(`${updatedAgents[i].x},${updatedAgents[i].y}`, updatedAgents[i].id);
+    }
+  }
+  
+  // Check moving agents against stationary agents
+  for (let i = 0; i < desiredMoves.length; i++) {
+    if (blockedAgentIndices.has(i)) continue;
+    const move = desiredMoves[i];
+    if (move.action !== 'move') continue;
+    const key = `${move.nextX},${move.nextY}`;
+    const occupant = agentPositions.get(key);
+    if (occupant !== undefined && occupant !== move.agent.id) {
+      blockedAgentIndices.add(i);
+    }
+  }
+
+  // === PHASE 2: ATOMIC MOVEMENT — Apply all moves simultaneously ===
+  const finalAgents = updatedAgents.map((agent, i) => {
+    const move = desiredMoves[i];
+    if (!move) return agent;
+    const a = { ...agent };
+
+    if (blockedAgentIndices.has(i)) {
+      // Agent was denied reservation — WAIT
+      a.waitTime++;
+      a.velocity = 0;
+      a.confidence = 'blocked';
+      a.status = 'waiting';
+      a.stuckTicks = (a.stuckTicks || 0) + 1;
+
+      // STUCK REROUTE: If stuck behind another agent for 3+ ticks, reroute
+      if (a.stuckTicks >= 3 && a.targetX !== null && a.targetY !== null) {
+        // Mark the blocking cell as temporary obstacle for pathfinding
+        const blockingCell = { x: move.nextX, y: move.nextY };
+        const tempBlocks = [...newState.manualBlocks, blockingCell];
+        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, tempBlocks);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, tempBlocks);
+        a.stuckTicks = 0;
+        a.status = 'moving';
+        a.confidence = 'recalculating';
+        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Reroute]: Stuck for 3 ticks — marking (${blockingCell.x},${blockingCell.y}) as obstacle, recalculating A* path`, type: 'warning' });
+      }
+      return a;
+    }
+
+    if (move.action === 'move' && (move.nextX !== a.x || move.nextY !== a.y)) {
+      a.x = move.nextX;
+      a.y = move.nextY;
       a.velocity = 1.0;
       a.energy = Math.max(0, a.energy - 0.1);
       a.confidence = 'clear';
+      a.stuckTicks = 0;
+
+      // Consume path step
+      if (a.path.length > 0 && a.path[0].x === move.nextX && a.path[0].y === move.nextY) {
+        a.path = a.path.slice(1);
+      }
 
       // Update traffic heatmap
       newState.trafficHeatmap[a.y][a.x] = Math.min(10, (newState.trafficHeatmap[a.y]?.[a.x] || 0) + 0.3);
@@ -426,7 +509,8 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         newState.decisionHeatmap[a.y][a.x] = Math.min(10, (newState.decisionHeatmap[a.y]?.[a.x] || 0) + 0.5);
       }
 
-      if (a.path.length === 0) {
+      // Check if delivery complete
+      if (a.path.length === 0 && a.targetX !== null && a.targetY !== null) {
         a.status = 'delivering';
         a.deliveries++;
         newState.successfulDeliveries++;
@@ -446,27 +530,10 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     return a;
   });
 
-  // Collision detection (now should be rare due to spatial locking)
-  const finalOccupied = new Map<string, number[]>();
-  for (const a of newAgents) {
-    const key = `${a.x},${a.y}`;
-    if (!finalOccupied.has(key)) finalOccupied.set(key, []);
-    finalOccupied.get(key)!.push(a.id);
+  // Log reservation conflicts
+  if (tickCollisions > 0) {
+    newState.logs.push({ tick: newState.tick, agentId: -1, message: `[Reservation]: ${tickCollisions} cell conflicts resolved — lower-priority agents waiting`, type: 'warning' });
   }
-  finalOccupied.forEach((ids, key) => {
-    if (ids.length > 1) {
-      tickCollisions += ids.length - 1;
-      ids.slice(1).forEach(id => {
-        const agent = newAgents.find(a => a.id === id)!;
-        agent.collisions++;
-        agent.confidence = 'recalculating';
-        if (agent.targetX !== null && agent.targetY !== null) {
-          agent.path = simplePath(agent.x, agent.y, agent.targetX, agent.targetY, newState.blockedIntersections, newState.manualBlocks);
-        }
-        newState.logs.push({ tick: newState.tick, agentId: agent.id, message: `Conflict at ${key} — spatial lock engaged, waiting`, type: 'warning' });
-      });
-    }
-  });
 
   newState.totalCollisions += tickCollisions;
   const totalWaitTime = newAgents.reduce((sum, a) => sum + (a.status === 'idle' || a.status === 'waiting' ? 0.5 : 0), 0);
