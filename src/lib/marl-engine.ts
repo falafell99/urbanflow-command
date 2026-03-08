@@ -167,7 +167,7 @@ function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: Blo
         ny = cy;
         nx = Math.max(0, Math.min(19, nx));
       }
-      if (isBlocked(nx, ny, blocked)) {
+      if (isBlocked(nx, ny, blocked, manualBlocks)) {
         // Skip this step
         break;
       }
