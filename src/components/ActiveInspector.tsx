@@ -15,6 +15,7 @@ const objectives: Record<string, string> = {
   delivering: 'Completing delivery handoff',
   idle: 'Awaiting task assignment',
   waiting: 'Stochastic backoff — resolving deadlock',
+  waiting_target: 'Waiting for target cell to clear...',
 };
 
 export default function ActiveInspector({ agent, tick, onClose }: Props) {
