@@ -898,13 +898,17 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       a.confidence = 'clear';
       a.stuckTicks = 0;
 
-      // Consume path step
+      // Consume path step (with debounced recalculation)
       if (a.path.length > 0 && a.path[0].x === move.nextX && a.path[0].y === move.nextY) {
         a.path = a.path.slice(1);
       } else if (a.targetX !== null && a.targetY !== null) {
-        const dynamicCosts = buildBufferCosts(updatedAgents, a.id);
-        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
-        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        // Path debounce: only recalculate every PATH_DEBOUNCE_TICKS
+        if (newState.tick - (a.lastPathTick || 0) >= PATH_DEBOUNCE_TICKS) {
+          a.lastPathTick = newState.tick;
+          const dynamicCosts = buildBufferCosts(updatedAgents, a.id);
+          a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+          a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
+        }
       }
 
       // Update traffic heatmap

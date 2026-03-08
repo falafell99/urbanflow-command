@@ -84,12 +84,14 @@ export default function ActiveInspector({ agent, tick, onClose }: Props) {
                   ? 'border-success/40 text-success text-[10px]'
                   : agent.status === 'waiting_target'
                     ? 'border-purple-400/40 text-purple-400 text-[10px]'
-                    : agent.status === 'waiting'
-                      ? 'border-orange-400/40 text-orange-400 text-[10px]'
-                      : 'border-muted-foreground/40 text-muted-foreground text-[10px]'
+                    : agent.status === 'stuck'
+                      ? 'border-red-500/40 text-red-500 text-[10px]'
+                      : agent.status === 'waiting'
+                        ? 'border-orange-400/40 text-orange-400 text-[10px]'
+                        : 'border-muted-foreground/40 text-muted-foreground text-[10px]'
             }
           >
-            {agent.status === 'moving' ? 'In Transit' : agent.status === 'delivering' ? 'Delivering' : agent.status === 'waiting_target' ? 'Waiting for Target' : agent.status === 'waiting' ? 'Backoff' : 'Idle'}
+            {agent.status === 'moving' ? 'In Transit' : agent.status === 'delivering' ? 'Delivering' : agent.status === 'waiting_target' ? 'Waiting for Target' : agent.status === 'stuck' ? 'STUCK' : agent.status === 'waiting' ? 'Backoff' : 'Idle'}
           </Badge>
         </div>
 

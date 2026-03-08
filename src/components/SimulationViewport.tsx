@@ -32,7 +32,9 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
         ? 'hsl(38 92% 50%)'
         : agent.status === 'waiting_target'
           ? 'hsl(270 70% 60%)'
-          : 'hsl(var(--muted-foreground))';
+          : agent.status === 'stuck'
+            ? 'hsl(0 80% 50%)'
+            : 'hsl(var(--muted-foreground))';
 
   const ringColor = confidenceColor[agent.confidence];
 
