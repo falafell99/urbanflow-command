@@ -118,6 +118,8 @@ function createAgent(id: number): Agent {
     oscillationCycles: 0,
     directionChanges: 0,
     coolingTicks: 0,
+    lastPathTick: 0,
+    freezeTicks: 0,
   };
 }
 
