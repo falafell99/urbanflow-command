@@ -519,6 +519,16 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       ? distance(a.x, a.y, a.targetX, a.targetY)
       : Number.POSITIVE_INFINITY;
 
+    // === FREEZE: Anti-oscillation lock (stuck status) ===
+    if (a.freezeTicks > 0) {
+      a.freezeTicks--;
+      a.status = 'stuck';
+      a.velocity = 0;
+      a.confidence = 'stuck';
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+      return a;
+    }
+
     // === Movement Cooling: too many direction changes without progress ===
     if (a.coolingTicks > 0) {
       a.coolingTicks--;
@@ -542,15 +552,24 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       }
     }
     if (newState.tick % DIRECTION_WINDOW === 0) {
-      if (a.directionChanges > DIRECTION_CHANGE_LIMIT) {
-        a.coolingTicks = COOLING_PERIOD;
-        a.directionChanges = 0;
-        a.status = 'waiting';
-        a.velocity = 0;
-        a.confidence = 'recalculating';
-        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Cooling]: Excessive direction changes — stationary for ${COOLING_PERIOD} ticks`, type: 'warning' });
-        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
-        return a;
+      if (a.directionChanges >= DIRECTION_CHANGE_LIMIT) {
+        // Check if agent actually progressed closer to target
+        const madeProgress = a.targetX !== null && a.targetY !== null && a.prevPositions.length >= DIRECTION_WINDOW
+          && distance(a.x, a.y, a.targetX, a.targetY) < distance(
+            a.prevPositions[a.prevPositions.length - DIRECTION_WINDOW]?.x ?? a.x,
+            a.prevPositions[a.prevPositions.length - DIRECTION_WINDOW]?.y ?? a.y,
+            a.targetX, a.targetY);
+
+        if (!madeProgress) {
+          a.freezeTicks = FREEZE_PERIOD;
+          a.directionChanges = 0;
+          a.status = 'stuck';
+          a.velocity = 0;
+          a.confidence = 'stuck';
+          newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[STUCK] Recalculating global route... frozen for ${FREEZE_PERIOD} ticks`, type: 'error' });
+          desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
+          return a;
+        }
       }
       a.directionChanges = 0;
     }
@@ -565,7 +584,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       return a;
     }
 
-    // Deadlock resolver: oscillation cycles -> forced random sidestep
+    // Deadlock resolver: oscillation cycles -> forced freeze
     if (a.status === 'moving' && detectOscillation(a.prevPositions)) {
       a.oscillationCycles = (a.oscillationCycles || 0) + 1;
     } else {
@@ -573,24 +592,13 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     }
 
     if (a.oscillationCycles > OSCILLATION_CYCLE_THRESHOLD) {
-      const sideSteps = [
-        { x: a.x + 1, y: a.y },
-        { x: a.x - 1, y: a.y },
-        { x: a.x, y: a.y + 1 },
-        { x: a.x, y: a.y - 1 },
-      ].filter(d => d.x >= 0 && d.x < GRID_SIZE && d.y >= 0 && d.y < GRID_SIZE
-        && !isBlocked(d.x, d.y, newState.blockedIntersections, newState.manualBlocks));
-
-      if (sideSteps.length > 0) {
-        const pick = sideSteps[randInt(sideSteps.length)];
-        desiredMoves.push({ agent: a, nextX: pick.x, nextY: pick.y, action: 'move', priority: priorityDistance });
-        newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Side-step]: Oscillation persisted — forcing random symmetry break`, type: 'warning' });
-      } else {
-        desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
-      }
+      a.freezeTicks = FREEZE_PERIOD;
       a.oscillationCycles = 0;
-      a.confidence = 'recalculating';
+      a.status = 'stuck';
+      a.confidence = 'stuck';
       a.velocity = 0;
+      newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[STUCK] Oscillation detected — freezing for ${FREEZE_PERIOD} ticks and recalculating`, type: 'error' });
+      desiredMoves.push({ agent: a, nextX: a.x, nextY: a.y, action: 'wait', priority: priorityDistance });
       return a;
     }
 
