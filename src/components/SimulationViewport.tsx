@@ -2,7 +2,6 @@ import { useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 import type { SimState, Agent } from '@/lib/marl-engine';
 
 const GRID_SIZE = 20;
@@ -16,12 +15,22 @@ interface Props {
   onToggleBlock: (x: number, y: number) => void;
 }
 
+const confidenceColor = {
+  clear: 'hsl(var(--success))',
+  recalculating: 'hsl(38 92% 50%)',
+  blocked: 'hsl(var(--destructive))',
+};
+
 function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: Agent; cellSize: number; selected: boolean; dimmed: boolean; onSelect: () => void }) {
   const statusColor = agent.status === 'moving'
     ? 'hsl(var(--primary))'
     : agent.status === 'delivering'
       ? 'hsl(var(--success))'
-      : 'hsl(var(--muted-foreground))';
+      : agent.status === 'waiting'
+        ? 'hsl(38 92% 50%)'
+        : 'hsl(var(--muted-foreground))';
+
+  const ringColor = confidenceColor[agent.confidence];
 
   return (
     <Tooltip>
@@ -34,16 +43,29 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
             top: `${(agent.y + 0.5) * cellSize - 0.6}%`,
             opacity: dimmed ? 0.25 : 1,
           }}
-          transition={{ duration: 0.15, ease: 'linear' }}
+          transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
           style={{ width: '1.2%', height: '1.2%' }}
         >
+          {/* Confidence Ring */}
+          <motion.div
+            className="absolute -inset-[4px] rounded-full"
+            style={{
+              border: `1.5px solid ${ringColor}`,
+              boxShadow: `0 0 6px ${ringColor}`,
+            }}
+            animate={{
+              opacity: agent.confidence === 'clear' ? 0.4 : [0.5, 1, 0.5],
+              scale: agent.confidence === 'clear' ? 1 : [1, 1.15, 1],
+            }}
+            transition={agent.confidence !== 'clear' ? { repeat: Infinity, duration: 0.8 } : { duration: 0.3 }}
+          />
           {selected && (
             <motion.div
-              className="absolute -inset-[6px] rounded-full border-2 border-primary"
+              className="absolute -inset-[8px] rounded-full border-2 border-primary"
               initial={{ scale: 0.5, opacity: 0 }}
               animate={{ scale: [1, 1.2, 1], opacity: 1 }}
               transition={{ scale: { repeat: Infinity, duration: 1.5 } }}
-              style={{ boxShadow: '0 0 8px hsl(var(--primary) / 0.3)' }}
+              style={{ boxShadow: '0 0 10px hsl(var(--primary) / 0.4)' }}
             />
           )}
           <svg viewBox="0 0 24 24" className="w-full h-full" fill="none">
@@ -55,11 +77,15 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
       </TooltipTrigger>
       <TooltipContent side="top" className="font-mono text-xs space-y-1 p-3">
         <div className="text-foreground font-semibold">Asset {String(agent.id).padStart(3, '0')}</div>
+        <div className="text-muted-foreground">Status: {agent.status} | Confidence: {agent.confidence}</div>
         <div className="text-muted-foreground">Velocity: {(agent.velocity ?? 0).toFixed(1)} u/t</div>
         <div className="text-muted-foreground">Energy: {(agent.energy ?? 100).toFixed(1)}%</div>
         <div className="text-muted-foreground">Position: ({agent.x}, {agent.y})</div>
         {agent.targetX !== null && (
           <div className="text-primary">Target: ({agent.targetX}, {agent.targetY})</div>
+        )}
+        {agent.backoffTicks > 0 && (
+          <div className="text-warning">Backoff: {agent.backoffTicks} ticks</div>
         )}
       </TooltipContent>
     </Tooltip>
@@ -69,6 +95,7 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
 export default function SimulationViewport({ state, selectedAgentId, onSelectAgent, heatmapVisible, onToggleHeatmap, onToggleBlock }: Props) {
   const cellSize = useMemo(() => 100 / GRID_SIZE, []);
   const hasSelection = selectedAgentId !== null;
+  const selectedAgent = hasSelection ? state.agents.find(a => a.id === selectedAgentId) : null;
 
   const roads = useMemo(() => {
     const h: number[] = [];
@@ -104,8 +131,9 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
           <Switch checked={heatmapVisible} onCheckedChange={onToggleHeatmap} className="scale-75" />
           <span>Heatmap</span>
         </label>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-primary" /> In Transit</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-primary" /> Moving</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-success" /> Delivering</span>
+        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm" style={{ backgroundColor: 'hsl(38 92% 50%)' }} /> Waiting</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-muted-foreground" /> Idle</span>
       </div>
 
@@ -135,7 +163,28 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
         )}
       </svg>
 
-      {/* Decision Heatmap Overlay */}
+      {/* Traffic Heatmap Overlay (blue) */}
+      <svg className="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+        {state.trafficHeatmap.map((row, y) =>
+          row.map((val, x) => {
+            if (val < 0.3) return null;
+            const intensity = Math.min(1, val / 6);
+            return (
+              <rect
+                key={`th-${y}-${x}`}
+                x={`${x * cellSize}%`}
+                y={`${y * cellSize}%`}
+                width={`${cellSize}%`}
+                height={`${cellSize}%`}
+                fill={`hsl(210 80% 55% / ${intensity * 0.35})`}
+                rx="1"
+              />
+            );
+          })
+        )}
+      </svg>
+
+      {/* Decision Heatmap Overlay (orange, togglable) */}
       {heatmapVisible && (
         <svg className="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
           {state.decisionHeatmap.map((row, y) =>
@@ -200,7 +249,31 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
         </div>
       ))}
 
-      {/* Trajectories */}
+      {/* Path Candidates (semi-transparent, selected agent only) */}
+      {selectedAgent && selectedAgent.pathCandidates.length > 1 && (
+        <svg className="absolute inset-0 w-full h-full pointer-events-none" xmlns="http://www.w3.org/2000/svg">
+          {selectedAgent.pathCandidates.slice(1).map((candidate, ci) => {
+            if (candidate.length < 2) return null;
+            const pts = [{ x: selectedAgent.x, y: selectedAgent.y }, ...candidate];
+            const d = pts.map((p, i) =>
+              `${i === 0 ? 'M' : 'L'} ${(p.x + 0.5) * cellSize} ${(p.y + 0.5) * cellSize}`
+            ).join(' ');
+            return (
+              <path
+                key={`cand-${ci}`}
+                d={d}
+                fill="none"
+                stroke="hsl(var(--primary))"
+                strokeWidth="1"
+                strokeDasharray="3 3"
+                opacity="0.2"
+              />
+            );
+          })}
+        </svg>
+      )}
+
+      {/* Primary Trajectories */}
       {state.agents
         .filter(a => a.path.length > 0)
         .slice(0, 15)
