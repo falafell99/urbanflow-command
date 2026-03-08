@@ -136,8 +136,8 @@ export function createInitialState(scenario: Scenario = 'standard'): SimState {
   };
 }
 
-function isBlocked(x: number, y: number, blocked: BlockedIntersection[]): boolean {
-  return blocked.some(b => b.x === x && b.y === y);
+function isBlocked(x: number, y: number, blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[] = []): boolean {
+  return blocked.some(b => b.x === x && b.y === y) || manualBlocks.some(b => b.x === x && b.y === y);
 }
 
 function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[] = []): { x: number; y: number }[] {
