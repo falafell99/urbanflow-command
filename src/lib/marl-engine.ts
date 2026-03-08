@@ -438,7 +438,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     nextX: number;
     nextY: number;
     action: 'move' | 'deliver' | 'idle' | 'wait';
-    priority: number;
+    priority?: number;
   }[] = [];
   
   // Build current occupation map
