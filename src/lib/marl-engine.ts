@@ -172,6 +172,7 @@ const DIRECTION_WINDOW = 5;
 const FREEZE_PERIOD = 15;
 const PATH_DEBOUNCE_TICKS = 5;
 const REPULSION_RANGE = 2;
+const OBSTACLE_ADJACENCY_COST = 4;
 
 function cellKey(x: number, y: number) {
   return `${x},${y}`;
