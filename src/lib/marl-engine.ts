@@ -540,52 +540,98 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   });
 
   // === CELL RESERVATION SYSTEM ===
-  // All agents that want to move compete for cell reservations
-  const reservations = new Map<string, number[]>(); // cellKey -> [agentIndices]
-  
+  const reservations = new Map<string, number[]>();
   for (let i = 0; i < desiredMoves.length; i++) {
     const move = desiredMoves[i];
-    if (move.action === 'move') {
-      const key = `${move.nextX},${move.nextY}`;
-      if (!reservations.has(key)) reservations.set(key, []);
-      reservations.get(key)!.push(i);
-    }
+    if (move.action !== 'move') continue;
+    const key = cellKey(move.nextX, move.nextY);
+    if (!reservations.has(key)) reservations.set(key, []);
+    reservations.get(key)!.push(i);
   }
 
-  // Resolve conflicts: lowest agent ID wins the reservation
   const blockedAgentIndices = new Set<number>();
-  reservations.forEach((indices) => {
-    if (indices.length > 1) {
-      // Sort by agent ID (lower = higher priority)
-      indices.sort((a, b) => desiredMoves[a].agent.id - desiredMoves[b].agent.id);
-      // First one wins, rest must wait
-      for (let k = 1; k < indices.length; k++) {
-        blockedAgentIndices.add(indices[k]);
-        tickCollisions++;
+  const reservedTargets = new Set<string>();
+
+  // Resolve reservation conflicts by priority: closer-to-target wins, then lower ID.
+  reservations.forEach((indices, key) => {
+    if (indices.length === 1) {
+      reservedTargets.add(key);
+      return;
+    }
+
+    indices.sort((a, b) => {
+      const pa = desiredMoves[a].priority ?? Number.POSITIVE_INFINITY;
+      const pb = desiredMoves[b].priority ?? Number.POSITIVE_INFINITY;
+      if (pa !== pb) return pa - pb;
+      return desiredMoves[a].agent.id - desiredMoves[b].agent.id;
+    });
+
+    const winner = indices[0];
+    reservedTargets.add(cellKey(desiredMoves[winner].nextX, desiredMoves[winner].nextY));
+
+    for (let k = 1; k < indices.length; k++) {
+      const loserIdx = indices[k];
+      const loser = updatedAgents[loserIdx];
+      const clearance = findClearanceCell(
+        loser,
+        newState.blockedIntersections,
+        newState.manualBlocks,
+        currentOccupied,
+        reservedTargets
+      );
+
+      if (clearance) {
+        desiredMoves[loserIdx] = {
+          ...desiredMoves[loserIdx],
+          nextX: clearance.x,
+          nextY: clearance.y,
+          action: 'move',
+        };
+        reservedTargets.add(cellKey(clearance.x, clearance.y));
+        continue;
       }
+
+      blockedAgentIndices.add(loserIdx);
+      tickCollisions++;
     }
   });
 
-  // Also check: is the target cell still occupied by an agent that isn't moving away?
-  const agentPositions = new Map<string, number>(); // cellKey -> agentId of agent staying
+  // Prevent entering cells occupied by agents that are not leaving this tick.
+  const stationaryCells = new Set<string>();
   for (let i = 0; i < updatedAgents.length; i++) {
     const move = desiredMoves[i];
-    if (!move) continue;
-    // If agent is NOT moving (waiting/idle/blocked), it occupies its current cell
-    if (move.action !== 'move' || blockedAgentIndices.has(i)) {
-      agentPositions.set(`${updatedAgents[i].x},${updatedAgents[i].y}`, updatedAgents[i].id);
+    if (!move || move.action !== 'move' || blockedAgentIndices.has(i)) {
+      stationaryCells.add(cellKey(updatedAgents[i].x, updatedAgents[i].y));
     }
   }
-  
-  // Check moving agents against stationary agents
+
   for (let i = 0; i < desiredMoves.length; i++) {
     if (blockedAgentIndices.has(i)) continue;
     const move = desiredMoves[i];
-    if (move.action !== 'move') continue;
-    const key = `${move.nextX},${move.nextY}`;
-    const occupant = agentPositions.get(key);
-    if (occupant !== undefined && occupant !== move.agent.id) {
+    if (!move || move.action !== 'move') continue;
+
+    const key = cellKey(move.nextX, move.nextY);
+    if (!stationaryCells.has(key)) continue;
+
+    const clearance = findClearanceCell(
+      updatedAgents[i],
+      newState.blockedIntersections,
+      newState.manualBlocks,
+      currentOccupied,
+      reservedTargets
+    );
+
+    if (clearance) {
+      desiredMoves[i] = {
+        ...desiredMoves[i],
+        nextX: clearance.x,
+        nextY: clearance.y,
+        action: 'move',
+      };
+      reservedTargets.add(cellKey(clearance.x, clearance.y));
+    } else {
       blockedAgentIndices.add(i);
+      tickCollisions++;
     }
   }
 
