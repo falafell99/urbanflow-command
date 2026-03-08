@@ -13,6 +13,7 @@ interface Props {
   onSelectAgent: (id: number | null) => void;
   heatmapVisible: boolean;
   onToggleHeatmap: () => void;
+  onToggleBlock: (x: number, y: number) => void;
 }
 
 function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: Agent; cellSize: number; selected: boolean; dimmed: boolean; onSelect: () => void }) {
@@ -65,7 +66,7 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
   );
 }
 
-export default function SimulationViewport({ state, selectedAgentId, onSelectAgent, heatmapVisible, onToggleHeatmap }: Props) {
+export default function SimulationViewport({ state, selectedAgentId, onSelectAgent, heatmapVisible, onToggleHeatmap, onToggleBlock }: Props) {
   const cellSize = useMemo(() => 100 / GRID_SIZE, []);
   const hasSelection = selectedAgentId !== null;
 
@@ -79,7 +80,16 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
   }, []);
 
   return (
-    <div className="panel relative w-full aspect-square overflow-hidden" onClick={() => onSelectAgent(null)}>
+    <div className="panel relative w-full aspect-square overflow-hidden" onClick={(e) => {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const relX = (e.clientX - rect.left) / rect.width;
+      const relY = (e.clientY - rect.top) / rect.height;
+      const gridX = Math.floor(relX * GRID_SIZE);
+      const gridY = Math.floor(relY * GRID_SIZE);
+      if (gridX >= 0 && gridX < GRID_SIZE && gridY >= 0 && gridY < GRID_SIZE) {
+        onToggleBlock(gridX, gridY);
+      }
+    }}>
       {/* Header */}
       <div className="absolute top-3 left-4 z-10 flex items-center gap-2">
         <div className="w-1.5 h-1.5 rounded-full bg-primary" />
@@ -170,6 +180,24 @@ export default function SimulationViewport({ state, selectedAgentId, onSelectAge
             <span className="text-destructive text-[8px] font-mono font-bold">BLOCKED</span>
           </div>
         </motion.div>
+      ))}
+
+      {/* Manual Blocks */}
+      {state.manualBlocks.map((b, i) => (
+        <div
+          key={`manual-${i}`}
+          className="absolute z-[5]"
+          style={{
+            left: `${b.x * cellSize}%`,
+            top: `${b.y * cellSize}%`,
+            width: `${cellSize}%`,
+            height: `${cellSize}%`,
+          }}
+        >
+          <div className="w-full h-full rounded-sm bg-destructive/40 border border-destructive flex items-center justify-center">
+            <span className="text-destructive text-[7px] font-mono font-bold">✕</span>
+          </div>
+        </div>
       ))}
 
       {/* Trajectories */}

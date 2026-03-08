@@ -47,6 +47,7 @@ export interface SimState {
   logs: LogEntry[];
   scenario: Scenario;
   blockedIntersections: BlockedIntersection[];
+  manualBlocks: { x: number; y: number }[];
   decisionHeatmap: number[][];
 }
 
@@ -61,6 +62,8 @@ export interface Hyperparams {
   learningRate: number;
   discountFactor: number;
   explorationRate: number;
+  collisionPenalty: number;
+  speedVsSafety: 'speed' | 'safety';
 }
 
 const GRID_SIZE = 20;
@@ -128,15 +131,16 @@ export function createInitialState(scenario: Scenario = 'standard'): SimState {
     logs: [],
     scenario,
     blockedIntersections,
+    manualBlocks: [],
     decisionHeatmap: createHeatmap(),
   };
 }
 
-function isBlocked(x: number, y: number, blocked: BlockedIntersection[]): boolean {
-  return blocked.some(b => b.x === x && b.y === y);
+function isBlocked(x: number, y: number, blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[] = []): boolean {
+  return blocked.some(b => b.x === x && b.y === y) || manualBlocks.some(b => b.x === x && b.y === y);
 }
 
-function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[] = []): { x: number; y: number }[] {
+function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[] = [], manualBlocks: { x: number; y: number }[] = []): { x: number; y: number }[] {
   const path: { x: number; y: number }[] = [];
   let cx = ax, cy = ay;
   while (cx !== tx || cy !== ty) {
@@ -147,7 +151,7 @@ function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: Blo
     else if (cy > ty) ny = cy - 1;
 
     // If next cell is blocked, try alternative
-    if (isBlocked(nx, ny, blocked)) {
+    if (isBlocked(nx, ny, blocked, manualBlocks)) {
       // Try perpendicular movement
       if (nx !== cx) {
         // Was moving horizontally, try vertical
@@ -163,7 +167,7 @@ function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: Blo
         ny = cy;
         nx = Math.max(0, Math.min(19, nx));
       }
-      if (isBlocked(nx, ny, blocked)) {
+      if (isBlocked(nx, ny, blocked, manualBlocks)) {
         // Skip this step
         break;
       }
@@ -240,7 +244,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     // Force all moving agents to recalculate
     newState.agents = newState.agents.map(a => {
       if (a.status === 'moving' && a.targetX !== null && a.targetY !== null) {
-        return { ...a, path: simplePath(a.x, a.y, a.targetX, a.targetY, newBlocked) };
+        return { ...a, path: simplePath(a.x, a.y, a.targetX, a.targetY, newBlocked, newState.manualBlocks) };
       }
       return a;
     });
@@ -285,7 +289,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         }
         a.targetX = target.x;
         a.targetY = target.y;
-        a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections);
+        a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks);
         a.status = 'moving';
         a.velocity = 1.0;
         target.claimed = true;
@@ -347,7 +351,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
           agent.x = jitterX;
           agent.y = jitterY;
           if (agent.targetX !== null && agent.targetY !== null) {
-            agent.path = simplePath(agent.x, agent.y, agent.targetX, agent.targetY, newState.blockedIntersections);
+            agent.path = simplePath(agent.x, agent.y, agent.targetX, agent.targetY, newState.blockedIntersections, newState.manualBlocks);
           }
           newState.logs.push({ tick: newState.tick, agentId: agent.id, message: `Conflict at ${key} — rerouting via avoidance protocol`, type: 'warning' });
         }
@@ -359,8 +363,9 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   newState.totalCollisions += collisions;
   const totalWaitTime = newAgents.reduce((sum, a) => sum + (a.status === 'idle' ? 0.5 : 0), 0);
   tickReward -= totalWaitTime * 0.5;
-  tickReward -= collisions * 50;
-  tickReward *= (1 + params.learningRate * params.discountFactor);
+  tickReward -= collisions * params.collisionPenalty;
+  const safetyMod = params.speedVsSafety === 'safety' ? 0.7 : 1.0;
+  tickReward *= safetyMod * (1 + params.learningRate * params.discountFactor);
 
   newState.totalReward += tickReward;
   newState.rewardHistory = [...newState.rewardHistory, newState.totalReward];

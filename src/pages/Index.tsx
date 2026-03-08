@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { Play, Pause, RotateCcw, Github } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -30,6 +31,8 @@ export default function Index() {
     learningRate: 0.003,
     discountFactor: 0.99,
     explorationRate: 0.15,
+    collisionPenalty: 50,
+    speedVsSafety: 'speed',
   });
   const paramsRef = useRef(params);
   paramsRef.current = params;
@@ -68,6 +71,28 @@ export default function Index() {
     setCongestionMode(false);
     setState(createInitialState(scenario));
   };
+
+  const handleToggleBlock = useCallback((x: number, y: number) => {
+    setState(prev => {
+      const exists = prev.manualBlocks.some(b => b.x === x && b.y === y);
+      const newBlocks = exists
+        ? prev.manualBlocks.filter(b => !(b.x === x && b.y === y))
+        : [...prev.manualBlocks, { x, y }];
+      toast(exists ? 'Obstacle removed' : 'Manual obstacle placed', {
+        description: `Cell (${x}, ${y}) — agents recalculating paths via A* policy`,
+        duration: 1500,
+      });
+      return { ...prev, manualBlocks: newBlocks };
+    });
+  }, []);
+
+  const handleParamsChange = useCallback((newParams: Hyperparams) => {
+    setParams(newParams);
+    toast('Neural Network Re-weighting...', {
+      description: 'Policy gradients updating with new hyperparameters',
+      duration: 2000,
+    });
+  }, []);
 
   const selectedAgent = selectedAgentId !== null
     ? state.agents.find(a => a.id === selectedAgentId) ?? null
@@ -143,6 +168,7 @@ export default function Index() {
               onSelectAgent={setSelectedAgentId}
               heatmapVisible={heatmapVisible}
               onToggleHeatmap={() => setHeatmapVisible(!heatmapVisible)}
+              onToggleBlock={handleToggleBlock}
             />
           </motion.div>
 
@@ -173,7 +199,7 @@ export default function Index() {
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.45 }} className="lg:col-span-3">
             <HyperparamPanel
               params={params}
-              onChange={setParams}
+              onChange={handleParamsChange}
               congestionMode={congestionMode}
               onCongestionToggle={setCongestionMode}
             />
