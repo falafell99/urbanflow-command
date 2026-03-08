@@ -895,6 +895,14 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     if (!move || move.action !== 'move') continue;
 
     const key = cellKey(move.nextX, move.nextY);
+
+    // CRITICAL: prevent movement into blocked cells (movement-loop check)
+    if (isBlocked(move.nextX, move.nextY, newState.blockedIntersections, newState.manualBlocks)) {
+      blockedAgentIndices.add(i);
+      tickCollisions++;
+      continue;
+    }
+
     if (!stationaryCells.has(key)) continue;
 
     const clearance = findClearanceCell(
