@@ -13,6 +13,7 @@ interface Props {
   onSelectAgent: (id: number | null) => void;
   heatmapVisible: boolean;
   onToggleHeatmap: () => void;
+  onToggleBlock: (x: number, y: number) => void;
 }
 
 function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: Agent; cellSize: number; selected: boolean; dimmed: boolean; onSelect: () => void }) {
