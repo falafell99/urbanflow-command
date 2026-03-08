@@ -30,6 +30,8 @@ export default function Index() {
     learningRate: 0.003,
     discountFactor: 0.99,
     explorationRate: 0.15,
+    collisionPenalty: 50,
+    speedVsSafety: 'speed',
   });
   const paramsRef = useRef(params);
   paramsRef.current = params;
