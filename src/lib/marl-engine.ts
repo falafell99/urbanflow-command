@@ -289,7 +289,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         }
         a.targetX = target.x;
         a.targetY = target.y;
-        a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections);
+        a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks);
         a.status = 'moving';
         a.velocity = 1.0;
         target.claimed = true;
