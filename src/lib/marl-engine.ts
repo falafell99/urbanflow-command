@@ -151,7 +151,7 @@ function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: Blo
     else if (cy > ty) ny = cy - 1;
 
     // If next cell is blocked, try alternative
-    if (isBlocked(nx, ny, blocked)) {
+    if (isBlocked(nx, ny, blocked, manualBlocks)) {
       // Try perpendicular movement
       if (nx !== cx) {
         // Was moving horizontally, try vertical
