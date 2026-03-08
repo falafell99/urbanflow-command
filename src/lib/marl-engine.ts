@@ -536,7 +536,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   }
 
   newState.totalCollisions += tickCollisions;
-  const totalWaitTime = newAgents.reduce((sum, a) => sum + (a.status === 'idle' || a.status === 'waiting' ? 0.5 : 0), 0);
+  const totalWaitTime = finalAgents.reduce((sum, a) => sum + (a.status === 'idle' || a.status === 'waiting' ? 0.5 : 0), 0);
   tickReward -= totalWaitTime * 0.5;
   tickReward -= tickCollisions * params.collisionPenalty;
   const safetyMod = params.speedVsSafety === 'safety' ? 0.7 : 1.0;
