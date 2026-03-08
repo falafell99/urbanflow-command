@@ -553,7 +553,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   const newLoss = Math.max(0.01, prevLoss * decay + noise);
   newState.lossHistory = [...newState.lossHistory, newLoss];
 
-  newState.agents = newAgents;
+  newState.agents = finalAgents;
 
   // Decay heatmaps
   if (newState.tick % 5 === 0) {
