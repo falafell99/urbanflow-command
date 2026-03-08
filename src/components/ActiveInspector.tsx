@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { X, Navigation, Battery, Clock, Target, Cpu } from 'lucide-react';
+import { X, Navigation, Battery, Clock, Target, Cpu, Copy, Check } from 'lucide-react';
 import type { Agent } from '@/lib/marl-engine';
 
 interface Props {
@@ -18,15 +18,21 @@ const objectives: Record<string, string> = {
 
 export default function ActiveInspector({ agent, tick, onClose }: Props) {
   const [confidence, setConfidence] = useState(92);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!agent) return;
-    // Simulate fluctuating confidence
     setConfidence(prev => {
       const delta = (Math.random() - 0.5) * 4;
       return Math.max(60, Math.min(99, prev + delta));
     });
   }, [tick, agent]);
+
+  const copyUUID = (uuid: string) => {
+    navigator.clipboard.writeText(uuid);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
 
   if (!agent) {
     return (
@@ -56,7 +62,16 @@ export default function ActiveInspector({ agent, tick, onClose }: Props) {
       <div className="space-y-4 flex-1">
         {/* UUID & Status */}
         <div className="flex items-center justify-between">
-          <span className="font-mono text-sm font-semibold text-foreground">{uuid}</span>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-sm font-semibold text-foreground">{uuid}</span>
+            <button
+              onClick={() => copyUUID(uuid)}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+              title="Copy UUID"
+            >
+              {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
+            </button>
+          </div>
           <Badge
             variant="outline"
             className={
@@ -103,13 +118,13 @@ export default function ActiveInspector({ agent, tick, onClose }: Props) {
               <Battery className="w-3 h-3" />
               <span className="text-[10px] uppercase tracking-wider">Battery Level</span>
             </div>
-            <span className={`font-mono text-xs ${agent.energy < 30 ? 'text-destructive' : agent.energy < 60 ? 'text-warning' : 'text-foreground'}`}>
-              {agent.energy.toFixed(1)}%
+            <span className={`font-mono text-xs ${(agent.energy ?? 100) < 30 ? 'text-destructive' : (agent.energy ?? 100) < 60 ? 'text-warning' : 'text-foreground'}`}>
+              {(agent.energy ?? 100).toFixed(1)}%
             </span>
           </div>
           <Progress
-            value={agent.energy}
-            className={`h-1.5 ${agent.energy < 30 ? '[&>div]:bg-destructive' : agent.energy < 60 ? '[&>div]:bg-warning' : ''} bg-secondary`}
+            value={agent.energy ?? 100}
+            className={`h-1.5 ${(agent.energy ?? 100) < 30 ? '[&>div]:bg-destructive' : (agent.energy ?? 100) < 60 ? '[&>div]:bg-warning' : ''} bg-secondary`}
           />
         </div>
 
@@ -131,7 +146,7 @@ export default function ActiveInspector({ agent, tick, onClose }: Props) {
               <Navigation className="w-3 h-3" />
               <span className="text-[10px] uppercase tracking-wider">Velocity</span>
             </div>
-            <p className="font-mono text-xs text-foreground">{agent.velocity.toFixed(1)} u/t</p>
+            <p className="font-mono text-xs text-foreground">{(agent.velocity ?? 0).toFixed(1)} u/t</p>
           </div>
           <div className="space-y-1">
             <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Position</span>

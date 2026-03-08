@@ -5,9 +5,10 @@ import { Activity, Package, AlertTriangle, Gauge, HeartPulse, Brain } from 'luci
 interface Props {
   state: SimState;
   running: boolean;
+  congestionMode: boolean;
 }
 
-export default function StatsBar({ state, running }: Props) {
+export default function StatsBar({ state, running, congestionMode }: Props) {
   const [epoch, setEpoch] = useState(0);
 
   useEffect(() => {
@@ -20,6 +21,10 @@ export default function StatsBar({ state, running }: Props) {
   const total = state.successfulDeliveries + state.failedDeliveries;
   const efficiency = total > 0 ? Math.round((state.successfulDeliveries / total) * 100) : 100;
 
+  const healthStatus = congestionMode
+    ? 'degraded'
+    : state.totalCollisions < 10 ? 'stable' : state.totalCollisions < 30 ? 'degraded' : 'critical';
+
   const stats = [
     { icon: Activity, label: 'Active Assets', value: activeAgents, sub: `/ ${state.agents.length}` },
     { icon: Package, label: 'Deliveries', value: state.successfulDeliveries, sub: `${state.failedDeliveries} failed` },
@@ -28,10 +33,10 @@ export default function StatsBar({ state, running }: Props) {
     {
       icon: HeartPulse,
       label: 'System Health',
-      value: state.totalCollisions < 10 ? 'Stable' : state.totalCollisions < 30 ? 'Degraded' : 'Critical',
+      value: healthStatus === 'stable' ? 'Stable' : healthStatus === 'degraded' ? 'Degraded' : 'Critical',
       sub: running ? 'online' : 'standby',
       pulse: true,
-      healthStatus: state.totalCollisions < 10 ? 'stable' : state.totalCollisions < 30 ? 'degraded' : 'critical',
+      healthStatus,
     },
     { icon: Brain, label: 'Training Epoch', value: epoch, sub: `tick ${state.tick}` },
   ];

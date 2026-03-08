@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Play, Pause, RotateCcw, Code2 } from 'lucide-react';
+import { Play, Pause, RotateCcw, Github } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import SimulationViewport from '@/components/SimulationViewport';
 import RewardChart from '@/components/RewardChart';
@@ -11,12 +11,15 @@ import TechArchitecture from '@/components/TechArchitecture';
 import StatsBar from '@/components/StatsBar';
 import AssetTable from '@/components/AssetTable';
 import ActiveInspector from '@/components/ActiveInspector';
+import LoadingOverlay from '@/components/LoadingOverlay';
+import ProjectFooter from '@/components/ProjectFooter';
 import { createInitialState, stepSimulation, type Hyperparams, type SimState } from '@/lib/marl-engine';
 
 export default function Index() {
   const [state, setState] = useState<SimState>(createInitialState);
   const [running, setRunning] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<number | null>(null);
+  const [congestionMode, setCongestionMode] = useState(false);
   const [params, setParams] = useState<Hyperparams>({
     learningRate: 0.003,
     discountFactor: 0.99,
@@ -24,9 +27,20 @@ export default function Index() {
   });
   const paramsRef = useRef(params);
   paramsRef.current = params;
+  const congestionRef = useRef(congestionMode);
+  congestionRef.current = congestionMode;
 
   const step = useCallback(() => {
-    setState(prev => stepSimulation(prev, paramsRef.current));
+    setState(prev => {
+      const next = stepSimulation(prev, paramsRef.current);
+      // Inject congestion spikes
+      if (congestionRef.current) {
+        const lastIdx = next.conflictHistory.length - 1;
+        next.conflictHistory[lastIdx] = (next.conflictHistory[lastIdx] || 0) + Math.floor(Math.random() * 5 + 3);
+        next.throughputHistory[lastIdx] = Math.max(0, (next.throughputHistory[lastIdx] || 0) - Math.floor(Math.random() * 2));
+      }
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -38,6 +52,7 @@ export default function Index() {
   const reset = () => {
     setRunning(false);
     setSelectedAgentId(null);
+    setCongestionMode(false);
     setState(createInitialState());
   };
 
@@ -46,9 +61,11 @@ export default function Index() {
     : null;
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
+      <LoadingOverlay />
+
       {/* Header */}
-      <header className="border-b border-border px-6 h-14 flex items-center justify-between">
+      <header className="border-b border-border px-4 sm:px-6 h-14 flex items-center justify-between flex-shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-primary" />
           <h1 className="text-sm font-semibold tracking-tight text-foreground">
@@ -63,10 +80,10 @@ export default function Index() {
             size="sm"
             variant="outline"
             className="text-muted-foreground hover:text-foreground h-8 text-xs gap-1.5"
-            onClick={() => {}}
+            onClick={() => window.open('https://github.com', '_blank')}
           >
-            <Code2 className="w-3.5 h-3.5" />
-            Source Code
+            <Github className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">View Implementation</span>
           </Button>
           <Button
             size="sm"
@@ -85,14 +102,14 @@ export default function Index() {
             }
           >
             {running ? <Pause className="w-3.5 h-3.5 mr-1.5" /> : <Play className="w-3.5 h-3.5 mr-1.5" />}
-            {running ? 'Pause' : 'Start Simulation'}
+            <span className="hidden sm:inline">{running ? 'Pause' : 'Start Simulation'}</span>
           </Button>
         </div>
       </header>
 
-      <div className="p-6 space-y-4">
+      <div className="p-4 sm:p-6 space-y-4 flex-1">
         {/* Stats Bar */}
-        <StatsBar state={state} running={running} />
+        <StatsBar state={state} running={running} congestionMode={congestionMode} />
 
         {/* Main Grid */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -111,9 +128,8 @@ export default function Index() {
           </motion.div>
 
           {/* Right Panel */}
-          <div className="lg:col-span-5 grid lg:grid-rows-[minmax(0,220px)_minmax(0,260px)_minmax(0,1fr)] gap-4 lg:h-[720px] min-h-0 overflow-hidden">
-            {/* Active Inspector */}
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="min-h-0">
+          <div className="lg:col-span-5 grid grid-rows-[auto_1fr_1fr] gap-4 lg:max-h-[720px] min-h-0 overflow-hidden">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.15 }} className="min-h-0 max-h-[260px] overflow-auto">
               <ActiveInspector
                 agent={selectedAgent}
                 tick={state.tick}
@@ -133,7 +149,12 @@ export default function Index() {
             <EfficiencyGauge state={state} />
           </motion.div>
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }} className="lg:col-span-3">
-            <HyperparamPanel params={params} onChange={setParams} />
+            <HyperparamPanel
+              params={params}
+              onChange={setParams}
+              congestionMode={congestionMode}
+              onCongestionToggle={setCongestionMode}
+            />
           </motion.div>
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }} className="lg:col-span-6">
             <AssetTable state={state} />
@@ -145,6 +166,8 @@ export default function Index() {
           </motion.div>
         </div>
       </div>
+
+      <ProjectFooter />
     </div>
   );
 }
