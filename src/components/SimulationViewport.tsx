@@ -39,12 +39,12 @@ function AssetMarker({ agent, cellSize, selected, dimmed, onSelect }: { agent: A
           className="absolute cursor-pointer"
           onClick={(e) => { e.stopPropagation(); onSelect(); }}
           animate={{
-            left: `${(agent.x + 0.5) * cellSize - 0.6}%`,
-            top: `${(agent.y + 0.5) * cellSize - 0.6}%`,
+            left: `${(agent.x + 0.5) * cellSize - 0.5}%`,
+            top: `${(agent.y + 0.5) * cellSize - 0.5}%`,
             opacity: dimmed ? 0.25 : 1,
           }}
           transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-          style={{ width: '1.2%', height: '1.2%' }}
+          style={{ width: '1%', height: '1%' }}
         >
           {/* Confidence Ring */}
           <motion.div
