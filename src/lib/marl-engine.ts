@@ -280,7 +280,7 @@ function generatePathCandidates(
   ty: number,
   blocked: BlockedIntersection[],
   manualBlocks: { x: number; y: number }[],
-  dynamicCosts: Map<string, number>
+  dynamicCosts: Map<string, number> = new Map()
 ): { x: number; y: number }[][] {
   const candidates: { x: number; y: number }[][] = [];
 
