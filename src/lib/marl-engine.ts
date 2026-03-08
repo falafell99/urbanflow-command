@@ -9,12 +9,16 @@ export interface Agent {
   targetX: number | null;
   targetY: number | null;
   path: { x: number; y: number }[];
+  pathCandidates: { x: number; y: number }[][];
   deliveries: number;
   collisions: number;
   waitTime: number;
-  status: 'idle' | 'moving' | 'delivering';
+  status: 'idle' | 'moving' | 'delivering' | 'waiting';
   velocity: number;
   energy: number;
+  confidence: 'clear' | 'recalculating' | 'blocked';
+  prevPositions: { x: number; y: number }[];
+  backoffTicks: number;
 }
 
 export interface DeliveryPoint {
@@ -49,6 +53,7 @@ export interface SimState {
   blockedIntersections: BlockedIntersection[];
   manualBlocks: { x: number; y: number }[];
   decisionHeatmap: number[][];
+  trafficHeatmap: number[][];
 }
 
 export interface LogEntry {
@@ -71,6 +76,7 @@ const AGENT_COUNT_STANDARD = 50;
 const AGENT_COUNT_PEAK = 100;
 const MAX_DELIVERIES = 8;
 const DELIVERY_TIMEOUT = 60;
+const OSCILLATION_WINDOW = 6;
 
 function randInt(max: number) {
   return Math.floor(Math.random() * max);
@@ -84,22 +90,30 @@ function createHeatmap(): number[][] {
   return Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(0));
 }
 
-export function createInitialState(scenario: Scenario = 'standard'): SimState {
-  const count = scenario === 'peak' ? AGENT_COUNT_PEAK : AGENT_COUNT_STANDARD;
-  const agents: Agent[] = Array.from({ length: count }, (_, i) => ({
-    id: i,
+function createAgent(id: number): Agent {
+  return {
+    id,
     x: randInt(GRID_SIZE),
     y: randInt(GRID_SIZE),
     targetX: null,
     targetY: null,
     path: [],
+    pathCandidates: [],
     deliveries: 0,
     collisions: 0,
     waitTime: 0,
-    status: 'idle' as const,
+    status: 'idle',
     velocity: 0,
     energy: 85 + Math.random() * 15,
-  }));
+    confidence: 'clear',
+    prevPositions: [],
+    backoffTicks: 0,
+  };
+}
+
+export function createInitialState(scenario: Scenario = 'standard'): SimState {
+  const count = scenario === 'peak' ? AGENT_COUNT_PEAK : AGENT_COUNT_STANDARD;
+  const agents: Agent[] = Array.from({ length: count }, (_, i) => createAgent(i));
 
   const blockedIntersections: BlockedIntersection[] = [];
   if (scenario === 'emergency') {
@@ -109,7 +123,6 @@ export function createInitialState(scenario: Scenario = 'standard'): SimState {
         intersections.push({ x, y });
       }
     }
-    // Block 3 random major intersections
     for (let i = 0; i < 3 && intersections.length > 0; i++) {
       const idx = randInt(intersections.length);
       blockedIntersections.push(intersections.splice(idx, 1)[0]);
@@ -133,6 +146,7 @@ export function createInitialState(scenario: Scenario = 'standard'): SimState {
     blockedIntersections,
     manualBlocks: [],
     decisionHeatmap: createHeatmap(),
+    trafficHeatmap: createHeatmap(),
   };
 }
 
@@ -150,11 +164,8 @@ function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: Blo
     else if (cy < ty) ny = cy + 1;
     else if (cy > ty) ny = cy - 1;
 
-    // If next cell is blocked, try alternative
     if (isBlocked(nx, ny, blocked, manualBlocks)) {
-      // Try perpendicular movement
       if (nx !== cx) {
-        // Was moving horizontally, try vertical
         if (cy < ty) ny = cy + 1;
         else if (cy > ty) ny = cy - 1;
         else ny = cy + (Math.random() > 0.5 ? 1 : -1);
@@ -168,19 +179,46 @@ function simplePath(ax: number, ay: number, tx: number, ty: number, blocked: Blo
         nx = Math.max(0, Math.min(19, nx));
       }
       if (isBlocked(nx, ny, blocked, manualBlocks)) {
-        // Skip this step
         break;
       }
     }
     cx = nx;
     cy = ny;
     path.push({ x: cx, y: cy });
-    if (path.length > 50) break; // safety
+    if (path.length > 50) break;
   }
   return path;
 }
 
-// AI-driven log messages for neural activity feed
+// Generate alternative path candidates for neural planning visualization
+function generatePathCandidates(ax: number, ay: number, tx: number, ty: number, blocked: BlockedIntersection[], manualBlocks: { x: number; y: number }[]): { x: number; y: number }[][] {
+  const candidates: { x: number; y: number }[][] = [];
+  // Primary path
+  candidates.push(simplePath(ax, ay, tx, ty, blocked, manualBlocks));
+  // Alternative: go horizontal first
+  const midX = tx, midY = ay;
+  if (!isBlocked(midX, midY, blocked, manualBlocks)) {
+    const alt1 = [...simplePath(ax, ay, midX, midY, blocked, manualBlocks), ...simplePath(midX, midY, tx, ty, blocked, manualBlocks)];
+    if (alt1.length > 0) candidates.push(alt1.slice(0, 30));
+  }
+  // Alternative: go vertical first
+  const midX2 = ax, midY2 = ty;
+  if (!isBlocked(midX2, midY2, blocked, manualBlocks)) {
+    const alt2 = [...simplePath(ax, ay, midX2, midY2, blocked, manualBlocks), ...simplePath(midX2, midY2, tx, ty, blocked, manualBlocks)];
+    if (alt2.length > 0) candidates.push(alt2.slice(0, 30));
+  }
+  return candidates;
+}
+
+// Detect oscillation: agent bouncing between same positions
+function detectOscillation(positions: { x: number; y: number }[]): boolean {
+  if (positions.length < OSCILLATION_WINDOW) return false;
+  const recent = positions.slice(-OSCILLATION_WINDOW);
+  const uniquePositions = new Set(recent.map(p => `${p.x},${p.y}`));
+  return uniquePositions.size <= 2;
+}
+
+// AI-driven log messages
 const cooperativeMessages = [
   "Switched to 'Cooperative Mode' to resolve deadlock",
   "Initiating collaborative pathfinding with nearby agents",
@@ -201,6 +239,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     tick: state.tick + 1,
     logs: [...state.logs],
     decisionHeatmap: state.decisionHeatmap.map(row => [...row]),
+    trafficHeatmap: state.trafficHeatmap.map(row => [...row]),
   };
   let tickReward = 0;
   let tickDeliveries = 0;
@@ -241,10 +280,13 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
       message: `⚠ Emergency reroute: ${newBlocked.length} intersections blocked — all agents recalculating`,
       type: 'error',
     });
-    // Force all moving agents to recalculate
     newState.agents = newState.agents.map(a => {
       if (a.status === 'moving' && a.targetX !== null && a.targetY !== null) {
-        return { ...a, path: simplePath(a.x, a.y, a.targetX, a.targetY, newBlocked, newState.manualBlocks) };
+        return {
+          ...a,
+          path: simplePath(a.x, a.y, a.targetX, a.targetY, newBlocked, newState.manualBlocks),
+          confidence: 'recalculating' as const,
+        };
       }
       return a;
     });
@@ -259,7 +301,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     return true;
   });
 
-  // Neural activity feed — inject AI-driven events periodically
+  // Neural activity feed
   if (newState.tick % 12 === 0 && newState.tick > 0) {
     const agentId = randInt(newState.agents.length);
     const msg = cooperativeMessages[randInt(cooperativeMessages.length)];
@@ -271,12 +313,54 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
     newState.logs.push({ tick: newState.tick, agentId: -1, message: `[Optimization]: ${msgFn(pct)}`, type: 'success' });
   }
 
-  // Update agents
-  const occupiedCells = new Map<string, number[]>();
-  const newAgents = newState.agents.map(agent => {
-    const a = { ...agent };
+  // === PHASE 1: Build occupation map from current positions ===
+  const occupationMap = new Map<string, number>();
+  for (const agent of newState.agents) {
+    occupationMap.set(`${agent.x},${agent.y}`, agent.id);
+  }
 
-    if (a.status === 'idle') {
+  // === PHASE 2: Compute desired moves with spatial locking ===
+  const newAgents = newState.agents.map(agent => {
+    const a: Agent = {
+      ...agent,
+      prevPositions: [...agent.prevPositions, { x: agent.x, y: agent.y }].slice(-OSCILLATION_WINDOW),
+    };
+
+    // Handle backoff cooldown
+    if (a.backoffTicks > 0) {
+      a.backoffTicks--;
+      a.status = 'waiting';
+      a.velocity = 0;
+      a.confidence = 'recalculating';
+      return a;
+    }
+
+    // Detect oscillation → stochastic backoff
+    if (a.status === 'moving' && detectOscillation(a.prevPositions)) {
+      a.backoffTicks = 1 + randInt(2);
+      a.status = 'waiting';
+      a.velocity = 0;
+      a.confidence = 'recalculating';
+      // Pick a random adjacent cell to break deadlock
+      const dirs = [
+        { x: a.x + 1, y: a.y }, { x: a.x - 1, y: a.y },
+        { x: a.x, y: a.y + 1 }, { x: a.x, y: a.y - 1 },
+      ].filter(d => d.x >= 0 && d.x < GRID_SIZE && d.y >= 0 && d.y < GRID_SIZE
+        && !isBlocked(d.x, d.y, newState.blockedIntersections, newState.manualBlocks));
+      if (dirs.length > 0) {
+        const pick = dirs[randInt(dirs.length)];
+        a.x = pick.x;
+        a.y = pick.y;
+      }
+      if (a.targetX !== null && a.targetY !== null) {
+        a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks);
+      }
+      newState.logs.push({ tick: newState.tick, agentId: a.id, message: `[Backoff]: Oscillation detected — stochastic repositioning`, type: 'warning' });
+      return a;
+    }
+
+    if (a.status === 'idle' || a.status === 'waiting') {
       a.velocity = 0;
       const unclaimed = newState.deliveryPoints.filter(dp => !dp.claimed);
       if (unclaimed.length > 0) {
@@ -290,27 +374,52 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         a.targetX = target.x;
         a.targetY = target.y;
         a.path = simplePath(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks);
+        a.pathCandidates = generatePathCandidates(a.x, a.y, target.x, target.y, newState.blockedIntersections, newState.manualBlocks);
         a.status = 'moving';
         a.velocity = 1.0;
+        a.confidence = 'clear';
         target.claimed = true;
         target.claimedBy = a.id;
 
-        // Update decision heatmap at decision point
         newState.decisionHeatmap[a.y][a.x] = Math.min(10, (newState.decisionHeatmap[a.y]?.[a.x] || 0) + 1);
       } else {
         a.waitTime++;
+        a.status = 'idle';
       }
     }
 
     if (a.status === 'moving' && a.path.length > 0) {
       const next = a.path[0];
+
+      // === SPATIAL LOCKING: Check if target cell is occupied ===
+      const targetKey = `${next.x},${next.y}`;
+      const occupant = occupationMap.get(targetKey);
+      if (occupant !== undefined && occupant !== a.id) {
+        // Cell is occupied — lower-priority agent (higher ID) must WAIT
+        a.waitTime++;
+        a.velocity = 0;
+        a.confidence = 'blocked';
+        // Don't move, stay in current cell
+        return a;
+      }
+
+      // Move to next cell
+      const prevKey = `${a.x},${a.y}`;
+      if (occupationMap.get(prevKey) === a.id) {
+        occupationMap.delete(prevKey);
+      }
       a.x = next.x;
       a.y = next.y;
+      occupationMap.set(targetKey, a.id);
       a.path = a.path.slice(1);
       a.velocity = 1.0;
       a.energy = Math.max(0, a.energy - 0.1);
+      a.confidence = 'clear';
 
-      // Heatmap: intersections where agents make decisions
+      // Update traffic heatmap
+      newState.trafficHeatmap[a.y][a.x] = Math.min(10, (newState.trafficHeatmap[a.y]?.[a.x] || 0) + 0.3);
+
+      // Decision heatmap at intersections
       if (a.x % 4 === 0 && a.y % 4 === 0) {
         newState.decisionHeatmap[a.y][a.x] = Math.min(10, (newState.decisionHeatmap[a.y]?.[a.x] || 0) + 0.5);
       }
@@ -325,45 +434,42 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         newState.logs.push({ tick: newState.tick, agentId: a.id, message: `Delivery confirmed at (${a.targetX},${a.targetY})`, type: 'success' });
         a.targetX = null;
         a.targetY = null;
+        a.pathCandidates = [];
         a.status = 'idle';
         a.velocity = 0;
+        a.confidence = 'clear';
       }
     }
-
-    const key = `${a.x},${a.y}`;
-    if (!occupiedCells.has(key)) occupiedCells.set(key, []);
-    occupiedCells.get(key)!.push(a.id);
 
     return a;
   });
 
-  // Collision detection
-  let collisions = 0;
-  occupiedCells.forEach((ids, key) => {
+  // Collision detection (now should be rare due to spatial locking)
+  const finalOccupied = new Map<string, number[]>();
+  for (const a of newAgents) {
+    const key = `${a.x},${a.y}`;
+    if (!finalOccupied.has(key)) finalOccupied.set(key, []);
+    finalOccupied.get(key)!.push(a.id);
+  }
+  finalOccupied.forEach((ids, key) => {
     if (ids.length > 1) {
-      collisions += ids.length - 1;
-      ids.forEach(id => {
+      tickCollisions += ids.length - 1;
+      ids.slice(1).forEach(id => {
         const agent = newAgents.find(a => a.id === id)!;
         agent.collisions++;
-        if (agent.path.length > 0) {
-          const jitterX = Math.max(0, Math.min(GRID_SIZE - 1, agent.x + (Math.random() > 0.5 ? 1 : -1)));
-          const jitterY = Math.max(0, Math.min(GRID_SIZE - 1, agent.y + (Math.random() > 0.5 ? 1 : -1)));
-          agent.x = jitterX;
-          agent.y = jitterY;
-          if (agent.targetX !== null && agent.targetY !== null) {
-            agent.path = simplePath(agent.x, agent.y, agent.targetX, agent.targetY, newState.blockedIntersections, newState.manualBlocks);
-          }
-          newState.logs.push({ tick: newState.tick, agentId: agent.id, message: `Conflict at ${key} — rerouting via avoidance protocol`, type: 'warning' });
+        agent.confidence = 'recalculating';
+        if (agent.targetX !== null && agent.targetY !== null) {
+          agent.path = simplePath(agent.x, agent.y, agent.targetX, agent.targetY, newState.blockedIntersections, newState.manualBlocks);
         }
+        newState.logs.push({ tick: newState.tick, agentId: agent.id, message: `Conflict at ${key} — spatial lock engaged, waiting`, type: 'warning' });
       });
     }
   });
 
-  tickCollisions = collisions;
-  newState.totalCollisions += collisions;
-  const totalWaitTime = newAgents.reduce((sum, a) => sum + (a.status === 'idle' ? 0.5 : 0), 0);
+  newState.totalCollisions += tickCollisions;
+  const totalWaitTime = newAgents.reduce((sum, a) => sum + (a.status === 'idle' || a.status === 'waiting' ? 0.5 : 0), 0);
   tickReward -= totalWaitTime * 0.5;
-  tickReward -= collisions * params.collisionPenalty;
+  tickReward -= tickCollisions * params.collisionPenalty;
   const safetyMod = params.speedVsSafety === 'safety' ? 0.7 : 1.0;
   tickReward *= safetyMod * (1 + params.learningRate * params.discountFactor);
 
@@ -372,7 +478,6 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
   newState.throughputHistory = [...newState.throughputHistory, tickDeliveries];
   newState.conflictHistory = [...newState.conflictHistory, tickCollisions];
 
-  // Loss curve: simulate decreasing loss with noise
   const prevLoss = state.lossHistory[state.lossHistory.length - 1] || 0.8;
   const decay = 0.997;
   const noise = (Math.random() - 0.5) * 0.02;
@@ -381,11 +486,12 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
 
   newState.agents = newAgents;
 
-  // Decay heatmap slightly each tick
+  // Decay heatmaps
   if (newState.tick % 5 === 0) {
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
         newState.decisionHeatmap[y][x] = Math.max(0, newState.decisionHeatmap[y][x] * 0.95);
+        newState.trafficHeatmap[y][x] = Math.max(0, newState.trafficHeatmap[y][x] * 0.9);
       }
     }
   }
