@@ -16,7 +16,7 @@ export interface Agent {
   status: 'idle' | 'moving' | 'delivering' | 'waiting' | 'waiting_target';
   velocity: number;
   energy: number;
-  confidence: 'clear' | 'recalculating' | 'blocked';
+  confidence: 'clear' | 'recalculating' | 'blocked' | 'waiting_target';
   prevPositions: { x: number; y: number }[];
   backoffTicks: number;
   stuckTicks: number;
