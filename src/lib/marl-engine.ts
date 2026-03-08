@@ -962,7 +962,7 @@ export function stepSimulation(state: SimState, params: Hyperparams): SimState {
         // Path debounce: only recalculate every PATH_DEBOUNCE_TICKS
         if (newState.tick - (a.lastPathTick || 0) >= PATH_DEBOUNCE_TICKS) {
           a.lastPathTick = newState.tick;
-          const dynamicCosts = buildBufferCosts(updatedAgents, a.id);
+          const dynamicCosts = buildBufferCosts(updatedAgents, a.id, newState.blockedIntersections, newState.manualBlocks);
           a.path = simplePath(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
           a.pathCandidates = generatePathCandidates(a.x, a.y, a.targetX, a.targetY, newState.blockedIntersections, newState.manualBlocks, dynamicCosts);
         }
