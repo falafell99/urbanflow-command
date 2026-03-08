@@ -185,6 +185,8 @@ function isBlocked(x: number, y: number, blocked: BlockedIntersection[], manualB
 function buildBufferCosts(
   agents: Agent[],
   selfId: number,
+  blocked: BlockedIntersection[] = [],
+  manualBlocks: { x: number; y: number }[] = [],
   boostedCell?: { x: number; y: number }
 ): Map<string, number> {
   const costs = new Map<string, number>();
@@ -198,6 +200,19 @@ function buildBufferCosts(
   if (boostedCell) {
     const key = cellKey(boostedCell.x, boostedCell.y);
     costs.set(key, Math.max(costs.get(key) ?? 0, WIDE_REROUTE_PENALTY));
+  }
+
+  // Obstacle adjacency avoidance: cells next to blocked cells get extra cost
+  const allBlocked = [...blocked, ...manualBlocks];
+  for (const b of allBlocked) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = b.x + dx;
+      const ny = b.y + dy;
+      if (nx < 0 || nx >= GRID_SIZE || ny < 0 || ny >= GRID_SIZE) continue;
+      if (isBlocked(nx, ny, blocked, manualBlocks)) continue;
+      const key = cellKey(nx, ny);
+      costs.set(key, Math.max(costs.get(key) ?? 0, OBSTACLE_ADJACENCY_COST));
+    }
   }
 
   return costs;
