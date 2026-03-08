@@ -42,7 +42,7 @@ export default function RewardChart({ state }: Props) {
               stroke="hsl(183, 100%, 50%)"
               strokeWidth={2}
               dot={false}
-              strokeShadow="0 0 8px hsl(183, 100%, 50%)"
+              filter="drop-shadow(0 0 4px hsl(183, 100%, 50%))"
             />
           </LineChart>
         </ResponsiveContainer>
