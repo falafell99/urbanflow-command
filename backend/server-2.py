@@ -14,6 +14,12 @@ from flask_cors import CORS
 from env import UrbanGridEnv
 from agent import PPOAgent
 
+from flask import Flask
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "UrbanFlow API is running!"
 app = Flask(__name__)
 CORS(app)
 
